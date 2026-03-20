@@ -35,7 +35,6 @@ def preprocess_batch(batch, device=None):
         positions = positions.to(device)
 
     B = scans.size(0)
-    print("Batch size:", B)
 
     # future maps (target)
     mask_gridMap = LocalMap(X_lim=MAP_X_LIMIT,
