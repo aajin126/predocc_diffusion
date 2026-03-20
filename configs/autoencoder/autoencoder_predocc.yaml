@@ -6,6 +6,7 @@ model:
     embed_dim: 2
     seq_len: 10  
     temporal_hidden_dim: 32
+    decoder_hidden_dim: 32 
     map_channels: 1
     lossconfig:
       target: modules.losses.AELoss

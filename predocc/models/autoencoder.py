@@ -557,6 +557,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         out_ch=1,
         resolution=64,
         temporal_hidden_dim=32,
+        decoder_hidden_dim=32,
         map_channels=1,
         num_hiddens=128,
         num_residual_layers=2,
@@ -571,6 +572,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         self.embed_dim = embed_dim
         self.seq_len = seq_len
         self.temporal_hidden_dim = temporal_hidden_dim
+        self.decoder_hidden_dim = decoder_hidden_dim
         self.map_channels = map_channels
         self.in_channels = in_channels
         self.out_ch = out_ch
@@ -609,12 +611,26 @@ class SequenceAutoencoderKL(pl.LightningModule):
                                     stride=1)
         
         self._decoder = Decoder(
-            out_channels=seq_len * self.out_ch,
+            out_channels=decoder_hidden_dim,
             num_hiddens=self.num_hiddens,
             num_residual_layers=self.num_residual_layers,
             num_residual_hiddens=self.num_residual_hiddens,
         )
 
+        # ---------- Temporal decoder ----------
+        self.temporal_decoder = ConvLSTMCell(
+            input_dim=decoder_hidden_dim,
+            hidden_dim=decoder_hidden_dim,
+            kernel_size=(3, 3),
+            bias=True,
+        )        
+
+        self.frame_head = nn.Sequential(
+            nn.Conv2d(decoder_hidden_dim, decoder_hidden_dim // 2, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(decoder_hidden_dim // 2, out_ch, kernel_size=1, stride=1),
+            nn.Sigmoid()
+        )
         
         self.loss = instantiate_from_config(lossconfig)
 
@@ -643,7 +659,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
     # ------------------------------------------------------------------
     # Core VAE
     # ------------------------------------------------------------------
-    def encode(self, x_seq, x_map=None):
+    def encode(self, x_seq, x_map):
         """
         x_seq: (B, T, C, H, W)
         x_map: (B, map_channels, H, W)
@@ -674,17 +690,32 @@ class SequenceAutoencoderKL(pl.LightningModule):
         z: (B, embed_dim, H_lat, W_lat)
         returns: (B, T, C, H, W)
         """
-        z = self._decoder_z_mu(z)
-        dec = self._decoder(z)                   # (B, T*C, H, W)
+    
+        b = z.shape[0]
 
-        b, tc, h, w = dec.shape
-        expected_tc = self.seq_len * self.out_ch
-        assert tc == expected_tc, f"Expected {expected_tc} output channels, got {tc}"
+        z_feat = self._decoder_z_mu(z)  # [B, num_hiddens, H_lat, W_lat]
+        dec = self._decoder(z_feat)   # [B, decoder_hidden_dim, H, W]
 
-        dec = dec.view(b, self.seq_len, self.out_ch, h, w)
-        return dec
+        h_dec, c_dec = self.temporal_decoder.init_hidden(
+            batch_size=b, image_size=(dec.shape[-2], dec.shape[-1])
+        )
 
-    def forward(self, input_seq, x_map=None, sample_posterior=False):
+        outputs = []
+        dec_input = dec
+
+        for t in range(self.seq_len):
+            h_dec, c_dec = self.temporal_decoder(
+                input_tensor=dec_input,
+                cur_state=[h_dec, c_dec],
+            )
+            frame = self.frame_head(h_dec)       # [B, 1, H, W]
+            outputs.append(frame)
+        
+        outputs = torch.stack(outputs, dim=1)  # [B, T, 1, H, W]
+
+        return outputs
+
+    def forward(self, input_seq, x_map, sample_posterior=False):
         """
         input_seq: (B, T, C, H, W)
         x_map: (B, map_channels, H, W)
@@ -766,7 +797,9 @@ class SequenceAutoencoderKL(pl.LightningModule):
             list(self._decoder.parameters()) +
             list(self._encoder_z_mu.parameters()) +
             list(self._encoder_z_log_var.parameters()) +
-            list(self._decoder_z_mu.parameters()),
+            list(self._decoder_z_mu.parameters()) +
+            list(self.temporal_decoder.parameters())+
+            list(self.frame_head.parameters()),
             lr=lr,
             betas=(0.5, 0.9),
         )
