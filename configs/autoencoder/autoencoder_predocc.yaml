@@ -6,6 +6,7 @@ model:
     embed_dim: 2
     seq_len: 10  
     temporal_hidden_dim: 32
+    map_channels: 1
     lossconfig:
       target: modules.losses.AELoss
       params:
@@ -30,7 +31,7 @@ data:
 
 lightning:
   trainer:
-    max_epochs: 100
+    max_epochs: 60
     check_val_every_n_epoch: 1
 
   callbacks:
