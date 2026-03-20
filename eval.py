@@ -126,17 +126,10 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
             # Get model inputs z, c, x_gt, xrec, xc
             x_in, x_gt, x_occ_map, x_rel, y_rel, th_rel = model.get_input(
                                                             batch,
-                                                            process = 'test'
-                                                        )
-
-            print(f"x_in shape: {x_in.shape}, x_gt shape: {x_gt.shape}")
+                                                            process = 'test')
             
             t0 = time.perf_counter()
-            c, _ = model.get_encoding(x_in)
-
-            print(f"cond shape: {c.shape}, cond range: [{c.min():.4f}, {c.max():.4f}]")
-            print(f"x_in range: [{x_in.min():.4f}, {x_in.max():.4f}]")
-            print(f"x_gt range: [{x_gt.min():.4f}, {x_gt.max():.4f}]")
+            c, _ = model.get_encoding(x_in, x_gt, x_occ_map)
 
             # Measure sampling time
             if device.type == "cuda":
