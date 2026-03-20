@@ -557,7 +557,6 @@ class SequenceAutoencoderKL(pl.LightningModule):
         out_ch=1,
         resolution=64,
         temporal_hidden_dim=32,
-        map_channels=1,
         num_hiddens=128,
         num_residual_layers=2,
         num_residual_hiddens=64,
@@ -571,7 +570,6 @@ class SequenceAutoencoderKL(pl.LightningModule):
         self.embed_dim = embed_dim
         self.seq_len = seq_len
         self.temporal_hidden_dim = temporal_hidden_dim
-        self.map_channels = map_channels
         self.in_channels = in_channels
         self.out_ch = out_ch
         self.resolution = resolution
@@ -588,7 +586,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         )
 
         self._encoder = Encoder(
-            in_channels=temporal_hidden_dim + map_channels,
+            in_channels=temporal_hidden_dim,
             num_hiddens=self.num_hiddens,
             num_residual_layers=self.num_residual_layers,
             num_residual_hiddens=self.num_residual_hiddens,
@@ -643,10 +641,9 @@ class SequenceAutoencoderKL(pl.LightningModule):
     # ------------------------------------------------------------------
     # Core VAE
     # ------------------------------------------------------------------
-    def encode(self, x_seq, x_map=None):
+    def encode(self, x_seq):
         """
         x_seq: (B, T, C, H, W)
-        x_map: (B, map_channels, H, W)
         returns: posterior over ONE latent per sequence
         """
         b, t, c, h, w = x_seq.shape
@@ -659,8 +656,8 @@ class SequenceAutoencoderKL(pl.LightningModule):
                 input_tensor=x_seq[:, i],
                 cur_state=[h_enc, enc_state],
             )
-        enc_in = torch.cat([h_enc, x_map], dim=1) 
-        feat = self._encoder(enc_in)
+
+        feat = self._encoder(h_enc)
         z_mu = self._encoder_z_mu(feat)
         z_log_var = self._encoder_z_log_var(feat)
 
@@ -684,12 +681,11 @@ class SequenceAutoencoderKL(pl.LightningModule):
         dec = dec.view(b, self.seq_len, self.out_ch, h, w)
         return dec
 
-    def forward(self, input_seq, x_map=None, sample_posterior=False):
+    def forward(self, input_seq, sample_posterior=False):
         """
         input_seq: (B, T, C, H, W)
-        x_map: (B, map_channels, H, W)
         """
-        posterior = self.encode(input_seq, x_map)
+        posterior = self.encode(input_seq)
         z = posterior.sample() if sample_posterior else posterior.mode()
         dec = self.decode(z)
         return dec, posterior
@@ -704,19 +700,17 @@ class SequenceAutoencoderKL(pl.LightningModule):
         """
         maps = preprocess_batch(batch, device=self.device)
         x = maps["mask_binary_maps"]  # (B, T, 1, H, W)
-        x_map = maps["input_occ_grid_map"]  # (B, map_channels, H, W)
         x = x.reshape(-1, SEQ_LEN, 1, IMG_SIZE, IMG_SIZE)
-        x_map = x_map.reshape(-1, 1, IMG_SIZE, IMG_SIZE)
         
-        return x, x_map
+        return x
 
     # ------------------------------------------------------------------
     # Training / validation
     # Manual optimization for modern Lightning multi-optimizer support
     # ------------------------------------------------------------------
     def training_step(self, batch, batch_idx):
-        inputs, x_map = self.get_input(batch, self.image_key)              # (B,T,C,H,W)
-        reconstructions, posterior = self(inputs, x_map)          # recon: (B,T,C,H,W)
+        inputs = self.get_input(batch, self.image_key)              # (B,T,C,H,W)
+        reconstructions, posterior = self(inputs)          # recon: (B,T,C,H,W)
 
         opt_ae = self.optimizers()
 
@@ -741,8 +735,8 @@ class SequenceAutoencoderKL(pl.LightningModule):
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx):
-        inputs, x_map = self.get_input(batch, self.image_key)
-        reconstructions, posterior = self(inputs, x_map)
+        inputs = self.get_input(batch, self.image_key)
+        reconstructions, posterior = self(inputs)
 
         b, t, c, h, w = inputs.shape
 
@@ -801,10 +795,9 @@ class SequenceAutoencoderKL(pl.LightningModule):
             if i >= num_batches: 
                 break
 
-            x, x_map = self.get_input(batch, self.image_key)
+            x = self.get_input(batch, self.image_key)
             x = x.to(self.device)  # (B,T,1,H,W)
-            x_map = x_map.to(self.device)  # (B, map_channels, H, W)
-            posterior = self.encode(x, x_map)
+            posterior = self.encode(x)
             z = posterior.mode() if use_mode else posterior.sample()    # (B,C_lat,H_lat,W_lat)
 
             mean_list.append(z.mean().item())
@@ -853,11 +846,10 @@ class SequenceAutoencoderKL(pl.LightningModule):
             samples:         (B*T, C, H, W)
         """
         log = dict()
-        x, x_map = self.get_input(batch, self.image_key)
+        x = self.get_input(batch, self.image_key)
         x = x.to(self.device)   # (B, T, C, H, W)
-        x_map = x_map.to(self.device)  # (B, map_channels, H, W)
         b, t, c, h, w = x.shape
-        xrec, posterior = self(x, x_map)                                   # (B,T,C,H,W)
+        xrec, posterior = self(x)                                   # (B,T,C,H,W)
 
         z = torch.randn_like(posterior.sample())
         samples = self.decode(z)                                      # (B,T,C,H,W)

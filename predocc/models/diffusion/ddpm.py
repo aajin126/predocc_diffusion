@@ -1535,14 +1535,14 @@ class PredOccLatentDiffusion(LatentDiffusion):
             param.requires_grad = False
 
     @torch.no_grad()
-    def encode_first_stage(self, x, x_map):
-        return self.first_stage_model.encode(x, x_map)
+    def encode_first_stage(self, x):
+        return self.first_stage_model.encode(x)
     
     def get_encoding(self,input_binary_maps, mask_binary_maps = None, input_occ_grid_map = None):
 
         # LDM v1.0 : Using pretrained AE
         with torch.no_grad():
-            past_posterior = self.encode_first_stage(input_binary_maps, input_occ_grid_map)
+            past_posterior = self.encode_first_stage(input_binary_maps)
             cond = self.scale_factor * past_posterior.mode()
         
         ## LDM v1.1, v1.2 : Using ConvLSTM for conditioning
