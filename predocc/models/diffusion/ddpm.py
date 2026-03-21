@@ -1561,7 +1561,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         # 2) future sequence -> sequence AE latent
         if mask_binary_maps is not None:
             with torch.no_grad():
-                encoder_posterior = self.encode_first_stage(mask_binary_maps, input_occ_grid_map)  # sequence input
+                encoder_posterior = self.encode_first_stage(mask_binary_maps)  # sequence input
                 z = self.get_first_stage_encoding(encoder_posterior)                  # (B,C_lat,H_lat,W_lat)
 
         ## LDM v1.2 : pooling-based conditioning

@@ -1,19 +1,22 @@
 import torch
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
-
-from util import instantiate_from_config
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', )))
+sys.path.append("/home/oem/hj/predocc_diffusion/predocc")
+from predocc.util import instantiate_from_config
 
 # config load
 config = OmegaConf.load("../configs/autoencoder/autoencoder_predocc.yaml")
 
 # data root fix
-config.data.params.train.params.data_root = "/home/ewhaglab/develop/data/OGM-datasets/OGM-Turtlebot2/train/"
-config.data.params.validation.params.data_root = "/home/ewhaglab/develop/data/OGM-datasets/OGM-Turtlebot2/val/"
+config.data.params.train.params.data_root = "/home/oem/hj/data/OGM-datasets/OGM-Turtlebot2/train/"
+config.data.params.validation.params.data_root = "/home/oem/hj/data/OGM-datasets/OGM-Turtlebot2/val/"
 
 model = instantiate_from_config(config.model)
 ckpt = torch.load(
-    "/home/ewhaglab/develop/predocc_diffusion/models/first_stage_models/predocc_ae/last.ckpt",
+    "/home/oem/hj/predocc_diffusion/logs/2026-03-20T16-51-28_ae1.0/checkpoints/last.ckpt",
     map_location="cpu",
 )
 state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
