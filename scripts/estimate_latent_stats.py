@@ -13,7 +13,7 @@ config.data.params.validation.params.data_root = "/home/ewhaglab/develop/data/OG
 
 model = instantiate_from_config(config.model)
 ckpt = torch.load(
-    "/home/ewhaglab/develop/predocc_diffusion/models/first_stage_models/predocc_ae/last.ckpt",
+    "/home/ewhaglab/develop/predocc_diffusion/logs/2026-03-20T16-32-43_ae2.0/checkpoints/last.ckpt",
     map_location="cpu",
 )
 state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt

@@ -149,9 +149,6 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
             # Decode latent to sequence
             pred_seq = model.decode_first_stage(z_samples)  # (num_samples, T, 1, H, W)
             
-            print(f"z_samples shape: {z_samples.shape}, range: [{z_samples.min():.4f}, {z_samples.max():.4f}]")
-            print(f"pred_seq shape: {pred_seq.shape}, range: [{pred_seq.min():.4f}, {pred_seq.max():.4f}]")
-            
             # Reprojection for each time step
             prediction_maps = torch.zeros(SEQ_LEN, 1, IMG_SIZE, IMG_SIZE).to(device)
 

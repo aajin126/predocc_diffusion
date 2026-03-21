@@ -15,7 +15,7 @@ model:
     convlstm_hidden_dim: 32
     scale_factor: 0.91537
 
-    first_stage_ckpt_path: "/home/ewhaglab/develop/predocc_diffusion/models/first_stage_models/AE/v1.0/val_last.ckpt"
+    first_stage_ckpt_path: "./logs/2026-03-20T16-32-43_ae2.0/checkpoints/last.ckpt"
 
     first_stage_config:
       target: models.autoencoder.SequenceAutoencoderKL
