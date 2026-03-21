@@ -6,6 +6,7 @@ https://github.com/CompVis/taming-transformers
 -- merci
 """
 import os
+from matplotlib import pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1671,7 +1672,17 @@ class PredOccLatentDiffusion(LatentDiffusion):
         
         return loss, loss_dict
 
+    @staticmethod
+    def compute_iou(pred, gt, occ_thr=0.3):
+        pred_occ = (pred > occ_thr)
+        gt_occ   = (gt > occ_thr)
 
+        inter = (pred_occ & gt_occ).sum().float()
+        union = (pred_occ | gt_occ).sum().float()
+
+        iou = inter / (union + 1e-6)
+
+        return iou
 
     @torch.no_grad()
     def log_images(self, batch, N=1, n_row=10, sample=True, ddim_steps=50, ddim_eta=1., return_keys=None,
@@ -1683,9 +1694,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
         log = dict()
 
         x_in, x_gt, x_occ = self.get_input(batch)
-        x_in = x_in[:1]
-        x_gt = x_gt[:1]
-        x_occ = x_occ[:1]
+        x_in = x_in[:N]
+        x_gt = x_gt[:N]
+        x_occ = x_occ[:N]
         t0 = time.perf_counter()
         c, z = self.get_encoding(x_in, x_gt, x_occ)
 		
@@ -1715,20 +1726,36 @@ class PredOccLatentDiffusion(LatentDiffusion):
         ddim_time = t1 - t0
         self.log("inference_time_sec", ddim_time, prog_bar=False, logger=True, on_step=True, on_epoch=False)
 
+        pred_seq = pred_seq.squeeze(0)  # (T, 1, H, W)
+        x_gt_vis = x_gt_vis.squeeze(0)  # (T, 1, H, W)
+
+        # frame-wise IoU
+        iou_list = []
+        for ti in range(n_row):
+            iou_t = self.compute_iou(pred_seq[ti], x_gt_vis[ti], occ_thr=0.3)
+            iou_list.append(iou_t.item())
+
         # GT vs DDIM prediction : 2 rows x T cols
         vis_list = []
-        T = x_gt_vis.shape[1]
-        for i in range(N):
-            panel = torch.cat([x_gt_vis[i], pred_seq[i]], dim=0)   # (2T,1,H,W)
-            grid = make_grid(
-		        panel,
-		        nrow=T,                 # T=10 -> 2 rows x 10 cols
-		        normalize=False,
-		        value_range=(0, 1)
-		    )
-            vis_list.append(grid)
-		
-        log["GT | DDIM Prediction"] = torch.stack(vis_list, dim=0)
+        T = x_gt_vis.shape[0]
+
+        panel = torch.cat([x_gt_vis, pred_seq], dim=0)   # (2T,1,H,W)
+        grid = make_grid(panel, nrow=T, normalize=False, value_range=(0, 1))
+        vis_list.append(grid)
+        grid_np = grid.detach().cpu().permute(1, 2, 0).numpy()
+        
+        if grid_np.shape[-1] == 1:
+            grid_np = grid_np[..., 0]
+
+        fig, ax = plt.subplots(figsize=(24, 8))
+        ax.imshow(grid_np, cmap="gray", vmin=0.0, vmax=1.0)
+        ax.axis("off")
+
+        iou_text = "  ".join([f"t{ti+1}:{iou_list[ti]:.3f}" for ti in range(n_row)])
+        ax.set_title(f"Frame-wise IoU | {iou_text}", fontsize=12)
+
+        log["GT | RECON | IoU"] = fig
+        
         return log
 
     def configure_optimizers(self):
