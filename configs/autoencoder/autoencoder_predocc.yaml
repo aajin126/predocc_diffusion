@@ -10,7 +10,7 @@ model:
     lossconfig:
       target: modules.losses.AELoss
       params:
-        kl_weight: 0.001
+        kl_weight: 0.000001
 
 data:
   target: main.DataModuleFromConfig

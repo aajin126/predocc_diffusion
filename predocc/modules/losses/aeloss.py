@@ -34,7 +34,7 @@ class AELoss(nn.Module):
         B = inputs.shape[0]
 
         # same frame weighting as train.py
-        end_w = 0.5
+        end_w = 0.9
         w = torch.linspace(1.0, end_w, steps=seq_len, device=inputs.device)
 
         ce_loss = 0.0
