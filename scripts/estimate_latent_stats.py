@@ -1,11 +1,36 @@
+
 import torch
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
+import sys
+import os
+# Add project root to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from util import instantiate_from_config
+# Patch sys.modules so 'modules' points to 'predocc.modules' and 'util' to 'predocc.util'
+import importlib
+
+try:
+    predocc_modules = importlib.import_module('predocc.modules')
+    sys.modules['modules'] = predocc_modules
+    predocc_util = importlib.import_module('predocc.util')
+    sys.modules['util'] = predocc_util
+    predocc_models = importlib.import_module('predocc.models')
+    sys.modules['models'] = predocc_models
+    predocc_data = importlib.import_module('predocc.data')
+    sys.modules['data'] = predocc_data
+except ImportError:
+    pass
+
+from predocc.util import instantiate_from_config
+
 
 # config load
+
 config = OmegaConf.load("../configs/autoencoder/autoencoder_predocc.yaml")
+# Patch model target to use fully qualified module path if needed
+if "target" in config.model and config.model["target"].startswith("models."):
+    config.model["target"] = "predocc." + config.model["target"]
 
 # data root fix
 config.data.params.train.params.data_root = "/home/ewhaglab/develop/data/OGM-datasets/OGM-Turtlebot2/train/"
@@ -13,7 +38,7 @@ config.data.params.validation.params.data_root = "/home/ewhaglab/develop/data/OG
 
 model = instantiate_from_config(config.model)
 ckpt = torch.load(
-    "/home/ewhaglab/develop/predocc_diffusion/logs/2026-03-20T16-32-43_ae2.0/checkpoints/last.ckpt",
+    "/home/ewhaglab/develop/predocc_diffusion/logs/2026-03-20T16-32-43_ae2.0/checkpoints/epoch=000050.ckpt",
     map_location="cpu",
 )
 state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
