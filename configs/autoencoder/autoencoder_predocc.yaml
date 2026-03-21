@@ -11,7 +11,12 @@ model:
       target: modules.losses.AELoss
       params:
         kl_weight: 0.001
-
+        disc_start: 12000
+        disc_num_layers: 3       
+        disc_in_channels: 1      
+        disc_factor: 1.0          
+        disc_weight: 0.5          
+        disc_loss: "hinge"         
 
 data:
   target: main.DataModuleFromConfig
@@ -38,7 +43,7 @@ lightning:
     image_logger:
       target: main.ImageLogger
       params:
-        batch_frequency: 50
+        batch_frequency: 100
         max_images: 10
         increase_log_steps: True
 

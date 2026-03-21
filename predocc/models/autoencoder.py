@@ -715,27 +715,33 @@ class SequenceAutoencoderKL(pl.LightningModule):
     # Manual optimization for modern Lightning multi-optimizer support
     # ------------------------------------------------------------------
     def training_step(self, batch, batch_idx):
-        inputs, x_map = self.get_input(batch, self.image_key)              # (B,T,C,H,W)
-        reconstructions, posterior = self(inputs, x_map)          # recon: (B,T,C,H,W)
+        opt_ae, opt_disc = self.optimizers()
+        inputs, x_map = self.get_input(batch, self.image_key)
+        reconstructions, posterior = self(inputs, x_map)
 
-        opt_ae = self.optimizers()
-
-        # Flatten time for the existing loss implementation
-        b, t, c, h, w = inputs.shape
-
-        # 1) AE / generator update
-        opt_ae.zero_grad()
+        # Generator (autoencoder) step
         aeloss, log_dict_ae = self.loss(
-            inputs,
-            reconstructions,
-            posterior,
-            split="train",
+            inputs, reconstructions, posterior,
+            0, self.global_step,
+            last_layer=self.get_last_layer(), split="train"
         )
+        opt_ae.zero_grad()
         self.manual_backward(aeloss)
         opt_ae.step()
+        for k, v in log_dict_ae.items():
+            self.log(k, v, prog_bar=False, logger=True, on_step=True, on_epoch=True)
 
-        self.log("train/total_loss", log_dict_ae["train/total_loss"], prog_bar=True, logger=True, on_step=True, on_epoch=True)
-        self.log_dict(log_dict_ae, prog_bar=True, logger=True, on_step=True, on_epoch=True)
+        # Discriminator step
+        discloss, log_dict_disc = self.loss(
+            inputs, reconstructions, posterior,
+            1, self.global_step,
+            last_layer=self.get_last_layer(), split="train"
+        )
+        opt_disc.zero_grad()
+        self.manual_backward(discloss)
+        opt_disc.step()
+        for k, v in log_dict_disc.items():
+            self.log(k, v, prog_bar=False, logger=True, on_step=True, on_epoch=True)
 
         return aeloss
 
@@ -744,18 +750,33 @@ class SequenceAutoencoderKL(pl.LightningModule):
         inputs, x_map = self.get_input(batch, self.image_key)
         reconstructions, posterior = self(inputs, x_map)
 
-        b, t, c, h, w = inputs.shape
-
+        # Generator (autoencoder) validation
         aeloss, log_dict_ae = self.loss(
             inputs,
             reconstructions,
             posterior,
+            0,  # optimizer_idx for generator
+            self.global_step,
+            last_layer=self.get_last_layer(),
             split="val"
         )
-        self.log("val/total_loss", log_dict_ae["val/total_loss"], prog_bar=True, logger=True, on_step=False, on_epoch=True)
-        self.log_dict(log_dict_ae, prog_bar=True, logger=True, on_step=False, on_epoch=True)
+        for k, v in log_dict_ae.items():
+            self.log(k, v, prog_bar=True, logger=True, on_step=True, on_epoch=True)
 
-        return log_dict_ae
+        # Discriminator validation
+        discloss, log_dict_disc = self.loss(
+            inputs,
+            reconstructions,
+            posterior,
+            1,  # optimizer_idx for discriminator
+            self.global_step,
+            last_layer=self.get_last_layer(),
+            split="val"
+        )
+        for k, v in log_dict_disc.items():
+            self.log(k, v, prog_bar=True, logger=True, on_step=True, on_epoch=True)
+
+        return {**log_dict_ae, **log_dict_disc}
 
     def configure_optimizers(self):
         lr = self.learning_rate
@@ -770,8 +791,8 @@ class SequenceAutoencoderKL(pl.LightningModule):
             lr=lr,
             betas=(0.5, 0.9),
         )
-
-        return opt_ae
+        opt_disc = torch.optim.Adam(self.loss.discriminator.parameters(), lr=lr, betas=(0.5, 0.9))
+        return [opt_ae, opt_disc], []
     
     def get_last_layer(self):
         return self._decoder._conv_trans_1[3].weight
