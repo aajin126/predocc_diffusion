@@ -13,7 +13,7 @@ model:
     monitor: val/loss
     use_ema: True
     convlstm_hidden_dim: 32
-    scale_factor: 1.0
+    scale_factor: 0.356351
 
     first_stage_ckpt_path: "./logs/2026-03-20T16-32-43_ae2.0/checkpoints/last.ckpt"
 
