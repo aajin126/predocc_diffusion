@@ -1542,22 +1542,26 @@ class PredOccLatentDiffusion(LatentDiffusion):
     
     def get_encoding(self,input_binary_maps, mask_binary_maps = None, input_occ_grid_map = None):
 
+        b, seq_len, _, h, w = input_binary_maps.shape
         # LDM v1.0 : Using pretrained AE
-        # with torch.no_grad():
-        #     past_posterior = self.encode_first_stage(input_binary_maps, input_occ_grid_map)
-        #     cond = self.scale_factor * past_posterior.mode()
+        with torch.no_grad():
+            past_posterior = self.encode_first_stage(input_binary_maps, input_occ_grid_map)
+            cond = self.scale_factor * past_posterior.mode()
         
-        # LDM v1.1, v1.2 : Using ConvLSTM for conditioning
-        h_enc, c_enc = self.convlstm_cell.init_hidden(batch_size=b, image_size=(h, w))
-        for t_seq in range(seq_len):
-            h_enc, c_enc = self.convlstm_cell(
-                input_tensor=input_binary_maps[:, t_seq],   # (B,1,64,64)
-                cur_state=[h_enc, c_enc],
-            )
+        # # LDM v1.1, v1.2 : Using ConvLSTM for conditioning
+        # h_enc, c_enc = self.convlstm_cell.init_hidden(batch_size=b, image_size=(h, w))
+        # for t_seq in range(seq_len):
+        #     h_enc, c_enc = self.convlstm_cell(
+        #         input_tensor=input_binary_maps[:, t_seq],   
+        #         cur_state=[h_enc, c_enc],
+        #     )
+        
+        # h_enc : (B,32,64,64)
 
-        # LDM v1.1 : encoder-based conditioning
-        cond_feat = self.cond_encoder(h_enc)       # (B,128,16,16)
-        cond = self.cond_proj(cond_feat)           # (B,32,16,16)
+        # # LDM v1.1 : encoder-based conditioning
+        # cond_feat = self.cond_encoder(h_enc)       # (B,128,16,16)
+
+        # cond = self.cond_proj(cond_feat)           # (B,32,16,16)
         
         z = None
         # 2) future sequence -> sequence AE latent
@@ -1765,9 +1769,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
         print(f"{self.__class__.__name__}: Optimizing diffusion only")
         params = (
             list(self.model.parameters()) #+
-            list(self.convlstm_cell.parameters()) + # LDM v1.1, v1.2
-            list(self.cond_encoder.parameters()) +  # LDM v1.1
-            list(self.cond_proj.parameters())       # LDM v1.1
+            # list(self.convlstm_cell.parameters()) + # LDM v1.1, v1.2
+            # list(self.cond_encoder.parameters()) +  # LDM v1.1
+            # list(self.cond_proj.parameters())       # LDM v1.1
         )
 
 
