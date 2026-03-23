@@ -1544,24 +1544,33 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         b, seq_len, _, h, w = input_binary_maps.shape
         # LDM v1.0 : Using pretrained AE
-        with torch.no_grad():
-            past_posterior = self.encode_first_stage(input_binary_maps, input_occ_grid_map)
-            cond = self.scale_factor * past_posterior.mode()
+        # with torch.no_grad():
+        #     past_posterior = self.encode_first_stage(input_binary_maps, input_occ_grid_map)
+        #     cond = self.scale_factor * past_posterior.mode()
+
+        # LDM v1.2 : Using only pretrained temporal AE
+        h_enc, c_enc = self.first_stage_model.temporal_encoder.init_hidden(batch_size=b, image_size=(h, w))
+    
+        for t in range(seq_len):
+            h_enc, c_enc = self.first_stage_model.temporal_encoder(
+                input_tensor=input_binary_maps[:, t],  # (B, C, H, W)
+                cur_state=[h_enc, c_enc]
+            )  
         
-        # # LDM v1.1, v1.2 : Using ConvLSTM for conditioning
+        # # LDM v1.1, v1.3 : Using ConvLSTM for conditioning
         # h_enc, c_enc = self.convlstm_cell.init_hidden(batch_size=b, image_size=(h, w))
-        # for t_seq in range(seq_len):
+        # for t in range(seq_len):
         #     h_enc, c_enc = self.convlstm_cell(
-        #         input_tensor=input_binary_maps[:, t_seq],   
+        #         input_tensor=input_binary_maps[:, t],   
         #         cur_state=[h_enc, c_enc],
         #     )
         
         # h_enc : (B,32,64,64)
 
-        # # LDM v1.1 : encoder-based conditioning
-        # cond_feat = self.cond_encoder(h_enc)       # (B,128,16,16)
+        # LDM v1.1, v1.2 : encoder-based conditioning
+        cond_feat = self.cond_encoder(h_enc)       # (B,128,16,16)
 
-        # cond = self.cond_proj(cond_feat)           # (B,32,16,16)
+        cond = self.cond_proj(cond_feat)           # (B,32,16,16)
         
         z = None
         # 2) future sequence -> sequence AE latent
@@ -1570,7 +1579,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
                 encoder_posterior = self.encode_first_stage(mask_binary_maps, input_occ_grid_map)  # sequence input
                 z = self.get_first_stage_encoding(encoder_posterior)                  # (B,C_lat,H_lat,W_lat)
 
-        ## LDM v1.2 : pooling-based conditioning
+        ## LDM v1.3 : pooling-based conditioning
         # h_enc: (B,32,64,64) -> latent spatial size (16,16)
         # cond = torch.nn.functional.adaptive_avg_pool2d(
         #     h_enc, (z.shape[2], z.shape[3])
@@ -1768,10 +1777,10 @@ class PredOccLatentDiffusion(LatentDiffusion):
         # LDM version check 
         print(f"{self.__class__.__name__}: Optimizing diffusion only")
         params = (
-            list(self.model.parameters()) #+
-            # list(self.convlstm_cell.parameters()) + # LDM v1.1, v1.2
-            # list(self.cond_encoder.parameters()) +  # LDM v1.1
-            # list(self.cond_proj.parameters())       # LDM v1.1
+            list(self.model.parameters()) +
+            # list(self.convlstm_cell.parameters()) + # LDM v1.1, v1.3
+            list(self.cond_encoder.parameters()) +  # LDM v1.1, v1.2
+            list(self.cond_proj.parameters())       # LDM v1.1, v1.2
         )
 
 
