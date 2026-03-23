@@ -15,7 +15,7 @@ model:
     convlstm_hidden_dim: 32
     scale_factor: 1.0
 
-    first_stage_ckpt_path: "./logs/2026-03-20T16-32-43_ae2.0/checkpoints/last.ckpt"
+    first_stage_ckpt_path: "./pretrained_models/first_stage_models/AE/v3.0/model.ckpt"
 
     first_stage_config:
       target: models.autoencoder.SequenceAutoencoderKL
@@ -52,7 +52,7 @@ model:
       target: modules.diffusionmodules.openaimodel.UNetModel
       params:
         image_size: 16
-        in_channels: 4  # 34 : x_noisy(2) + cond(32) # 4 : x_noisy(2) + cond(2)
+        in_channels: 34  # 34 : x_noisy(2) + cond(32) # 4 : x_noisy(2) + cond(2)
         out_channels: 2
         model_channels: 128
         attention_resolutions: [4]
@@ -85,7 +85,7 @@ data:
         
 lightning:
   trainer:
-    max_epochs: 100
+    max_epochs: 60
     check_val_every_n_epoch: 1
 
   callbacks:
