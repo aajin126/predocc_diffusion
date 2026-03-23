@@ -13,9 +13,9 @@ model:
     monitor: val/loss
     use_ema: True
     convlstm_hidden_dim: 32
-    scale_factor: 0.91537
+    scale_factor: 0.341287
 
-    first_stage_ckpt_path: "./logs/2026-03-20T16-32-43_ae2.0/checkpoints/last.ckpt"
+    first_stage_ckpt_path: "./pretrained_models/first_stage_models/AE/v2.0/model_kl.ckpt"
 
     first_stage_config:
       target: models.autoencoder.SequenceAutoencoderKL
