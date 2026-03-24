@@ -13,34 +13,29 @@ model:
         kl_weight: 0.000001
         disc_start: 400   
         disc_in_channels: 1           
-        disc_weight: 0.5                 
+        disc_weight: 0.5   
 
 data:
   target: main.DataModuleFromConfig
   params:
-    batch_size: 128
+    batch_size: 1
     num_workers: 4
-    train:
+    test:
       target: data.dataloader.PredOccDataset
       params:
-        data_root: "../data/OGM-datasets/OGM-Turtlebot2/train/"
-        split: "train"
-    validation:
-      target: data.dataloader.PredOccDataset
-      params:
-        data_root: "../data/OGM-datasets/OGM-Turtlebot2/val/"
-        split: "val"
+        data_root: "../data/OGM-datasets/OGM-Turtlebot2/test/"
+        split: "test"
 
 lightning:
   trainer:
-    max_epochs: 100
+    max_epochs: 60
     check_val_every_n_epoch: 1
 
   callbacks:
     image_logger:
       target: main.ImageLogger
       params:
-        batch_frequency: 100
+        batch_frequency: 50
         max_images: 10
         increase_log_steps: True
 
