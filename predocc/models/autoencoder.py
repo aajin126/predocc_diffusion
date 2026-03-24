@@ -641,52 +641,83 @@ class SequenceAutoencoderKL(pl.LightningModule):
     # ------------------------------------------------------------------
     # Core VAE
     # ------------------------------------------------------------------
-    def encode(self, x_seq):
+    def encode(self, x_seq, x_map=None):
         """
-        x_seq: (B, T, C, H, W)
-        returns: posterior over ONE latent per sequence
+        x_seq: (B, T, C, H, W) = (B, 10, 1, 64, 64)
+        returns: posterior over sequence of latents (B*T, 2, 16, 16)
+        
+        Pipeline:
+        - ConvLSTM: (B, 10, 1, 64, 64) → h_seq (B, 10, 32, 64, 64)
+        - Reshape: (B, 10, 32, 64, 64) → (B*10, 32, 64, 64)
+        - Encoder: (B*10, 32, 64, 64) → (B*10, 128, 16, 16)
+        - z_mu/z_log_var: (B*10, 2, 16, 16)
         """
         b, t, c, h, w = x_seq.shape
-        assert t == self.seq_len, f"Expected seq_len={self.seq_len}, got {t}"
-
+        
+        # Step 1: ConvLSTM forward - generate h_seq (B, 10, 32, 64, 64)
         h_enc, enc_state = self.temporal_encoder.init_hidden(batch_size=b, image_size=(h, w))
+        h_seq = []
         
         for i in range(t):
             h_enc, enc_state = self.temporal_encoder(
                 input_tensor=x_seq[:, i],
                 cur_state=[h_enc, enc_state],
             )
-
-        feat = self._encoder(h_enc)
-        z_mu = self._encoder_z_mu(feat)
-        z_log_var = self._encoder_z_log_var(feat)
-
-        moments = torch.cat([z_mu, z_log_var], dim=1) # concat along channel axis to create (mu, log_var) pairs
-        posterior = DiagonalGaussianDistribution(moments) # q(z|x_seq)
+            h_seq.append(h_enc.unsqueeze(1))
+        
+        # h_seq = [(B, 1, 32, 64, 64), (B, 1, 32, 64, 64), ..., (B, 1, 32, 64, 64)]
+        
+        h_seq = torch.cat(h_seq, dim=1)  # (B, T, 32, 64, 64)
+        
+        # Step 2: Reshape (B, T, 32, 64, 64) → (B*T, 32, 64, 64)
+        h_flat = h_seq.reshape(b * t, self.temporal_hidden_dim, h, w)
+        
+        # Step 3: Encoder (B*T, 32, 64, 64) → (B*T, 128, 16, 16)
+        feat = self._encoder(h_flat)
+        
+        # Step 4: z_mu, z_log_var (per-timestep)
+        z_mu = self._encoder_z_mu(feat)       # (B*T, 2, 16, 16)
+        z_log_var = self._encoder_z_log_var(feat)  # (B*T, 2, 16, 16)
+        
+        # Step 5: Create moments for DiagonalGaussianDistribution
+        moments = torch.cat([z_mu, z_log_var], dim=1)  # (B*T, 4, 16, 16)
+        posterior = DiagonalGaussianDistribution(moments)
         
         return posterior
 
     def decode(self, z):
         """
-        z: (B, embed_dim, H_lat, W_lat)
-        returns: (B, T, C, H, W)
+        z: (B*T, embed_dim, 16, 16)
+        returns: (B, T, C, H, W) = (B, 10, 1, 64, 64)
+        
+        Pipeline:
+        - decoder_z_mu: (B*T, 2, 16, 16) → (B*T, 128, 16, 16)
+        - Decoder: (B*T, 128, 16, 16) → (B*T, 1, 64, 64)
+        - Reshape: (B*T, 1, 64, 64) → (B, T, 1, 64, 64)
         """
-        z = self._decoder_z_mu(z)
-        dec = self._decoder(z)                   # (B, T*C, H, W)
-
-        b, tc, h, w = dec.shape
-        expected_tc = self.seq_len * self.out_ch
-        assert tc == expected_tc, f"Expected {expected_tc} output channels, got {tc}"
-
-        dec = dec.view(b, self.seq_len, self.out_ch, h, w)
+        b_t = z.shape[0]
+        
+        # Step 1: decoder_z_mu
+        z = self._decoder_z_mu(z)  # (B*T, 128, 16, 16)
+        
+        # Step 2: Decoder
+        dec = self._decoder(z)  # (B*T, 1, 64, 64)
+        
+        # Step 3: Reshape back to sequence
+        b = b_t // self.seq_len
+        t = self.seq_len
+        _, c_out, h_out, w_out = dec.shape
+        dec = dec.view(b, t, c_out, h_out, w_out)  # (B, T, 1, 64, 64)
+        
         return dec
 
-    def forward(self, input_seq, sample_posterior=False):
+    def forward(self, input_seq, x_map=None, sample_posterior=False):
         """
         input_seq: (B, T, C, H, W)
+        x_map: (unused in this pipeline)
         """
         posterior = self.encode(input_seq)
-        z = posterior.sample() if sample_posterior else posterior.mode()
+        z = posterior.sample() if sample_posterior else posterior.mode()  # (B*T, 2, 16, 16)
         dec = self.decode(z)
         return dec, posterior
 
