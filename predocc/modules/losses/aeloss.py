@@ -12,6 +12,7 @@ class AELoss(nn.Module):
         disc_in_channels=3,
         disc_factor=1.0,
         disc_weight=1.0,
+        disc_conditional=False,
         disc_loss="hinge"
     ):
         super().__init__()
@@ -27,6 +28,7 @@ class AELoss(nn.Module):
         self.disc_loss = hinge_d_loss if disc_loss == "hinge" else vanilla_d_loss
         self.disc_factor = disc_factor
         self.discriminator_weight = disc_weight
+        self.disc_conditional = disc_conditional
 
     def calculate_adaptive_weight(self, nll_loss, g_loss, last_layer):
         nll_grads = torch.autograd.grad(nll_loss, last_layer, retain_graph=True)[0]
@@ -67,13 +69,15 @@ class AELoss(nn.Module):
         # Generator update
         if optimizer_idx == 0:
             # (B, T, C, H, W) -> (B*T, C, H, W)
+            recon_ = reconstructions.contiguous().view(-1, reconstructions.size(2), reconstructions.size(3), reconstructions.size(4))
             # generator update
             if cond is None:
                 assert not self.disc_conditional
-                logits_fake = self.discriminator(reconstructions.contiguous())
+                logits_fake = self.discriminator(recon_)
             else:
                 assert self.disc_conditional
-                logits_fake = self.discriminator(torch.cat((reconstructions.contiguous(), cond), dim=1))
+                cond_ = cond.contiguous().view(-1, cond.size(2), cond.size(3), cond.size(4))
+                logits_fake = self.discriminator(torch.cat((recon_, cond_), dim=1))
             g_loss = -torch.mean(logits_fake)
 
             if self.disc_factor > 0.0:
@@ -100,12 +104,16 @@ class AELoss(nn.Module):
         # Discriminator update
         if optimizer_idx == 1:
             # second pass for discriminator update
+            # (B, T, C, H, W) -> (B*T, C, H, W)
+            inputs_ = inputs.contiguous().detach().view(-1, inputs.size(2), inputs.size(3), inputs.size(4))
+            recon_ = reconstructions.contiguous().detach().view(-1, reconstructions.size(2), reconstructions.size(3), reconstructions.size(4))
             if cond is None:
-                logits_real = self.discriminator(inputs.contiguous().detach())
-                logits_fake = self.discriminator(reconstructions.contiguous().detach())
+                logits_real = self.discriminator(inputs_)
+                logits_fake = self.discriminator(recon_)
             else:
-                logits_real = self.discriminator(torch.cat((inputs.contiguous().detach(), cond), dim=1))
-                logits_fake = self.discriminator(torch.cat((reconstructions.contiguous().detach(), cond), dim=1))
+                cond_ = cond.contiguous().view(-1, cond.size(2), cond.size(3), cond.size(4))
+                logits_real = self.discriminator(torch.cat((inputs_, cond_), dim=1))
+                logits_fake = self.discriminator(torch.cat((recon_, cond_), dim=1))
 
             disc_factor = adopt_weight(self.disc_factor, global_step, threshold=self.discriminator_iter_start)
             d_loss = disc_factor * self.disc_loss(logits_real, logits_fake)

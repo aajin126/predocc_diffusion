@@ -38,7 +38,7 @@ config.data.params.validation.params.data_root = "/home/ewhaglab/develop/data/OG
 
 model = instantiate_from_config(config.model)
 ckpt = torch.load(
-    "/home/ewhaglab/develop/predocc_diffusion/logs/2026-03-20T16-32-43_ae2.0/checkpoints/epoch=000050.ckpt",
+    "/home/ewhaglab/develop/predocc_diffusion/pretrained_models/first_stage_models/AE/v0.0/model.ckpt",
     map_location="cpu",
 )
 state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
@@ -57,4 +57,4 @@ dataloader = DataLoader(
     shuffle=False,
 )
 
-model.estimate_latent_stats(dataloader, num_batches=128, use_mode=False)
+model.estimate_latent_stats(dataloader, num_batches=1024, use_mode=False)
