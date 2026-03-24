@@ -624,13 +624,6 @@ class SequenceAutoencoderKL(pl.LightningModule):
             kernel_size=(3, 3),
             bias=True,
         )        
-
-        self.frame_head = nn.Sequential(
-            nn.Conv2d(decoder_hidden_dim, decoder_hidden_dim // 2, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(decoder_hidden_dim // 2, out_ch, kernel_size=1, stride=1),
-            nn.Sigmoid()
-        )
         
         self.loss = instantiate_from_config(lossconfig)
 
@@ -690,30 +683,40 @@ class SequenceAutoencoderKL(pl.LightningModule):
         z: (B, embed_dim, H_lat, W_lat)
         returns: (B, T, C, H, W)
         """
-    
         b = z.shape[0]
-
-        z_feat = self._decoder_z_mu(z)  # [B, num_hiddens, H_lat, W_lat]
-        dec = self._decoder(z_feat)   # [B, decoder_hidden_dim, H, W]
-
-        h_dec, c_dec = self.temporal_decoder.init_hidden(
-            batch_size=b, image_size=(dec.shape[-2], dec.shape[-1])
-        )
-
+        
+        # Step 1: decoder_z_mu projection
+        z = self._decoder_z_mu(z)  # (B, num_hiddens, H_lat, W_lat)
+        
+        # Step 2: Time expansion
+        z = z.unsqueeze(1).repeat(1, self.seq_len, 1, 1, 1)  # (B, T, num_hiddens, H_lat, W_lat)
+        
+        # Step 3: Temporal decoder - apply ConvLSTM over time
+        h, w = z.shape[-2:]
+        h_dec, c_dec = self.temporal_decoder.init_hidden(batch_size=b, image_size=(h, w))
+        
         outputs = []
-        dec_input = dec
-
         for t in range(self.seq_len):
             h_dec, c_dec = self.temporal_decoder(
-                input_tensor=dec_input,
+                input_tensor=z[:, t],  # (B, num_hiddens, H_lat, W_lat)
                 cur_state=[h_dec, c_dec],
             )
-            frame = self.frame_head(h_dec)       # [B, 1, H, W]
-            outputs.append(frame)
+            outputs.append(h_dec.unsqueeze(1))
         
-        outputs = torch.stack(outputs, dim=1)  # [B, T, 1, H, W]
-
-        return outputs
+        z_temporal = torch.cat(outputs, dim=1)  # (B, T, num_hiddens, H_lat, W_lat)
+        
+        # Step 4: Reshape for spatial decoder
+        _, t, c, h, w = z_temporal.shape
+        z_flat = z_temporal.reshape(b * t, c, h, w)  # (B*T, num_hiddens, H_lat, W_lat)
+        
+        # Step 5: Spatial decoder
+        dec = self._decoder(z_flat)  # (B*T, out_ch, H, W)
+        
+        # Step 6: Reshape back to sequence
+        _, out_ch, h_out, w_out = dec.shape
+        dec = dec.view(b, t, out_ch, h_out, w_out)  # (B, T, out_ch, H, W)
+        
+        return dec
 
     def forward(self, input_seq, x_map, sample_posterior=False):
         """
@@ -798,8 +801,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
             list(self._encoder_z_mu.parameters()) +
             list(self._encoder_z_log_var.parameters()) +
             list(self._decoder_z_mu.parameters()) +
-            list(self.temporal_decoder.parameters())+
-            list(self.frame_head.parameters()),
+            list(self.temporal_decoder.parameters()),
             lr=lr,
             betas=(0.5, 0.9),
         )
