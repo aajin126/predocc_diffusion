@@ -85,6 +85,12 @@ with torch.no_grad():
             batch_iou.append(iou)
         iou_list.append(batch_iou)
 
+        # Periodic CSV saving every 100 batches
+        if (batch_idx + 1) % 100 == 0:
+            iou_array_tmp = np.array(iou_list)
+            per_timestep_df_tmp = pd.DataFrame(iou_array_tmp, columns=[f"timestep_{t}" for t in range(iou_array_tmp.shape[1])])
+            per_timestep_df_tmp.to_csv(os.path.join(output_dir, "all_iou_per_timestep.csv"), index_label="batch_idx")
+
         fig = plt.figure(figsize=(8, 1))
         for m in range(SEQ_LEN):
             a = fig.add_subplot(1, SEQ_LEN, m + 1)
@@ -114,9 +120,3 @@ with torch.no_grad():
         img_path = os.path.join(output_dir, f"recon_{batch_idx}.png")
         plt.savefig(img_path, dpi=300)
         plt.close(fig)
-
-iou_array = np.array(iou_list)  # shape: (num_batches, seq_len)
-
-# Save all per-batch, per-timestep IoU values to CSV
-per_timestep_df = pd.DataFrame(iou_array, columns=[f"timestep_{t}" for t in range(iou_array.shape[1])])
-per_timestep_df.to_csv(os.path.join(output_dir, "all_iou_per_timestep.csv"), index_label="batch_idx")
