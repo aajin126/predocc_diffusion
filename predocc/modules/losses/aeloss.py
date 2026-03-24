@@ -33,13 +33,11 @@ class AELoss(nn.Module):
         seq_len = 10
         B = inputs.shape[0]
 
-        ce_loss = 0.0
-
+        ce_loss
 
         for k in range(seq_len):
 
-
-            ce_loss = ce_loss + torch.nn.functional.binary_cross_entropy(
+            ce_loss = ce_loss +  torch.nn.functional.binary_cross_entropy(
                 reconstructions[:, k],
                 inputs[:, k],
                 reduction="sum"
