@@ -83,7 +83,8 @@ with torch.no_grad():
         for t in range(recon.shape[1]):
             iou = compute_iou(recon[:, t], x[:, t])
             batch_iou.append(iou)
-        iou_list.append(batch_iou)
+        iou_tensor = torch.stack(batch_iou)
+        iou_list.append(iou_tensor.cpu().numpy())
 
         # Periodic CSV saving every 100 batches
         if (batch_idx + 1) % 100 == 0:
