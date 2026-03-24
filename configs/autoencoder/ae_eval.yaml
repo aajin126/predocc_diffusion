@@ -15,18 +15,13 @@ model:
 data:
   target: main.DataModuleFromConfig
   params:
-    batch_size: 128
+    batch_size: 1
     num_workers: 4
-    train:
+    test:
       target: data.dataloader.PredOccDataset
       params:
-        data_root: "../data/OGM-datasets/OGM-Turtlebot2/train/"
-        split: "train"
-    validation:
-      target: data.dataloader.PredOccDataset
-      params:
-        data_root: "../data/OGM-datasets/OGM-Turtlebot2/val/"
-        split: "val"
+        data_root: "../data/OGM-datasets/OGM-Turtlebot2/test/"
+        split: "test"
 
 lightning:
   trainer:
