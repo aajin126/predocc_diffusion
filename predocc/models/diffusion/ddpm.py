@@ -1566,7 +1566,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
                 cur_state=[h_enc, c_enc]
             )  
         
-        # # LDM v1.1, v1.4 : Using ConvLSTM for conditioning
+        # # LDM v1.1 : Using ConvLSTM for conditioning
         # h_enc, c_enc = self.convlstm_cell.init_hidden(batch_size=b, image_size=(h, w))
         # for t in range(seq_len):
         #     h_enc, c_enc = self.convlstm_cell(
@@ -1592,12 +1592,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
                 encoder_posterior = self.encode_first_stage(mask_binary_maps, input_occ_grid_map)  # sequence input
                 print(isinstance(encoder_posterior, DiagonalGaussianDistribution))
                 z = self.get_first_stage_encoding(encoder_posterior)                  # (B,C_lat,H_lat,W_lat)
-
-        ## LDM v1.4 : pooling-based conditioning
-        # h_enc: (B,32,64,64) -> latent spatial size (16,16)
-        # cond = torch.nn.functional.adaptive_avg_pool2d(
-        #     h_enc, (z.shape[2], z.shape[3])
-        # )   # (B,32,16,16)
 
         out = [cond, z]
 
@@ -1792,7 +1786,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         print(f"{self.__class__.__name__}: Optimizing diffusion only")
         params = (
             list(self.model.parameters()) +
-            # list(self.convlstm_cell.parameters()) + # LDM v1.1, v1.4
+            # list(self.convlstm_cell.parameters()) + # LDM v1.1
             list(self.cond_encoder.parameters()) +  # LDM v1.1, v1.2, v1.3
             list(self.cond_proj.parameters())       # LDM v1.1, v1.2, v1.3
         )
