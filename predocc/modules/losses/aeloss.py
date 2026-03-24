@@ -33,7 +33,7 @@ class AELoss(nn.Module):
         seq_len = 10
         B = inputs.shape[0]
 
-        ce_loss
+        ce_loss = 0
 
         for k in range(seq_len):
 

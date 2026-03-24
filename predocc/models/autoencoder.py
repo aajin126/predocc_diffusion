@@ -882,13 +882,10 @@ class SequenceAutoencoderKL(pl.LightningModule):
         b, t, c, h, w = x.shape
         xrec, posterior = self(x)                                   # (B,T,C,H,W)
 
-        z = torch.randn_like(posterior.sample())
-        samples = self.decode(z)                                      # (B,T,C,H,W)
 
         # batch 0
         gt_seq = x[0]         # (T,C,H,W)
         rec_seq = xrec[0]     # (T,C,H,W)
-        samp_seq = samples[0] # (T,C,H,W)
 
         # frame-wise IoU
         iou_list = []
@@ -896,7 +893,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
             iou_t = self.compute_iou(rec_seq[ti], gt_seq[ti], occ_thr=0.3)
             iou_list.append(iou_t.item())
 
-        panel = torch.cat([gt_seq, rec_seq, samp_seq], dim=0)       # (3T,C,H,W)
+        panel = torch.cat([gt_seq, rec_seq], dim=0)       # (2T,C,H,W)
         grid = make_grid(panel, nrow=10, normalize=False, value_range=(0, 1))
 
         grid_np = grid.detach().cpu().permute(1, 2, 0).numpy()
@@ -911,7 +908,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         iou_text = "  ".join([f"t{ti+1}:{iou_list[ti]:.3f}" for ti in range(t)])
         ax.set_title(f"Frame-wise IoU | {iou_text}", fontsize=12)
 
-        log["GT | RECON | SAMPLE | IoU"] = fig
+        log["GT | RECON | IoU"] = fig
 
         return log
 
