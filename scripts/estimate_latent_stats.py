@@ -57,4 +57,4 @@ dataloader = DataLoader(
     shuffle=False,
 )
 
-model.estimate_latent_stats(dataloader, num_batches=128, use_mode=False)
+model.estimate_latent_stats(dataloader, num_batches=500, use_mode=False)
