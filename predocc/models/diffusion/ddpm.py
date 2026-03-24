@@ -1590,7 +1590,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
         if mask_binary_maps is not None:
             with torch.no_grad():
                 encoder_posterior = self.encode_first_stage(mask_binary_maps, input_occ_grid_map)  # sequence input
-                print(isinstance(encoder_posterior, DiagonalGaussianDistribution))
                 z = self.get_first_stage_encoding(encoder_posterior)                  # (B,C_lat,H_lat,W_lat)
 
         out = [cond, z]
