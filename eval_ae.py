@@ -36,6 +36,9 @@ MAP_Y_LIMIT = [-3.2, 3.2]   # Map limits on the y-axis
 RESOLUTION = 0.1        # Grid resolution in [m]'
 TRESHOLD_P_OCC = 0.8    # Occupancy threshold
 
+output_dir = "ae_eval_results"
+os.makedirs(output_dir, exist_ok=True)
+
 config = OmegaConf.load("configs/autoencoder/ae_eval.yaml")
 model = instantiate_from_config(config.model)
 ckpt = torch.load("logs/2026-03-24T12-08-16_ae2.0_kl_test/checkpoints/last.ckpt", map_location="cpu")
@@ -68,7 +71,7 @@ def compute_iou(pred, gt, occ_thr=0.3):
     return iou
 
 with torch.no_grad():
-    for batch in tqdm(dataloader):
+    for batch_idx, batch in enumerate(tqdm(dataloader)):
         # (B, T, C, H, W), (B, map_channels, H, W)
         x, x_map = model.get_input(batch, model.image_key)
         recon, _ = model(x, x_map)  # (B, T, C, H, W)
@@ -82,7 +85,38 @@ with torch.no_grad():
             batch_iou.append(iou)
         iou_list.append(batch_iou)
 
+        fig = plt.figure(figsize=(8, 1))
+        for m in range(SEQ_LEN):
+            a = fig.add_subplot(1, SEQ_LEN, m + 1)
+            mask = x[0, m]  # (C, H, W)
+            input_grid = make_grid(mask.detach().cpu())
+            input_image = input_grid.permute(1, 2, 0)
+            plt.imshow(input_image)
+            plt.xticks([])
+            plt.yticks([])
+            fontsize = 8
+            a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
+        img_path = os.path.join(output_dir, f"gt_{batch_idx}.png")
+        plt.savefig(img_path, dpi=300)
+        plt.close(fig)
+
+        # Predicted occupancy maps
+        fig = plt.figure(figsize=(8, 1))
+        for m in range(SEQ_LEN):
+            a = fig.add_subplot(1, SEQ_LEN, m + 1)
+            pred = recon[0, m]  # (C, H, W)
+            input_grid = make_grid(pred.detach().cpu())
+            input_image = input_grid.permute(1, 2, 0)
+            plt.imshow(input_image)
+            plt.xticks([])
+            plt.yticks([])
+            a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
+        img_path = os.path.join(output_dir, f"recon_{batch_idx}.png")
+        plt.savefig(img_path, dpi=300)
+        plt.close(fig)
+
 iou_array = np.array(iou_list)  # shape: (num_batches, seq_len)
-mean_iou_per_timestep = np.mean(iou_array, axis=0)
-for t, miou in enumerate(mean_iou_per_timestep):
-    print(f"timestep {t}: IoU={miou:.6f}")
+
+# Save all per-batch, per-timestep IoU values to CSV
+per_timestep_df = pd.DataFrame(iou_array, columns=[f"timestep_{t}" for t in range(iou_array.shape[1])])
+per_timestep_df.to_csv(os.path.join(output_dir, "all_iou_per_timestep.csv"), index_label="batch_idx")
