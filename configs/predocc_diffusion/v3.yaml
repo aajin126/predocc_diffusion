@@ -24,6 +24,7 @@ model:
         seq_len: 10
         monitor: val/rec_loss
         temporal_hidden_dim: 32
+        map_channels: 1
         in_channels: 1
         out_ch: 1
         resolution: 64

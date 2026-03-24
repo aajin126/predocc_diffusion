@@ -1557,7 +1557,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         #     past_posterior = self.encode_first_stage(input_binary_maps, input_occ_grid_map)
         #     cond = self.scale_factor * past_posterior.mode()
 
-        # LDM v1.2 : Using only pretrained temporal AE
+        # LDM v1.2, v1.3 : Using only pretrained temporal AE
         h_enc, c_enc = self.first_stage_model.temporal_encoder.init_hidden(batch_size=b, image_size=(h, w))
     
         for t in range(seq_len):
@@ -1581,7 +1581,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         cond_feat = self.cond_encoder(cond_in)
         cond = self.cond_proj(cond_feat)
 
-        ## LDM v1.1, v1.2 : encoder-based conditioning
+        # # LDM v1.1, v1.2 : encoder-based conditioning
         # cond_feat = self.cond_encoder(h_enc)       # (B,128,16,16)
         # cond = self.cond_proj(cond_feat)           # (B,32,16,16)
         
