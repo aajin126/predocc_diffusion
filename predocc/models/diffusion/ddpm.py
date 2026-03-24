@@ -1539,7 +1539,16 @@ class PredOccLatentDiffusion(LatentDiffusion):
     @torch.no_grad()
     def encode_first_stage(self, x, x_map):
         return self.first_stage_model.encode(x, x_map)
-    
+
+    def get_first_stage_encoding(self, encoder_posterior):
+        if isinstance(encoder_posterior, DiagonalGaussianDistribution):
+            z = encoder_posterior.mode()
+        elif isinstance(encoder_posterior, torch.Tensor):
+            z = encoder_posterior
+        else:
+            raise NotImplementedError(f"encoder_posterior of type '{type(encoder_posterior)}' not yet implemented")
+        return self.scale_factor * z
+
     def get_encoding(self,input_binary_maps, mask_binary_maps = None, input_occ_grid_map = None):
 
         b, seq_len, _, h, w = input_binary_maps.shape
