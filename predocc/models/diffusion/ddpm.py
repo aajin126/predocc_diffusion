@@ -1715,12 +1715,15 @@ class PredOccLatentDiffusion(LatentDiffusion):
         seq_len = self.first_stage_model.seq_len
         cond_vis_expanded = cond_vis.repeat_interleave(seq_len, dim=0)  # (N*T, 32, 16, 16)
 		
-        # DDIM full sampling from random noise -> predicted future latent
+        # DDIM full sampling from random noise -> predicted future latent per frame
+        # batch_size=N*T will generate N*T independent samples
         if torch.cuda.is_available():
             torch.cuda.synchronize()
 
         with self.ema_scope("Plotting"):
-            # Sample N*T latents directly (not N then replicate)
+            # DDIM samples N*T latents independently
+            # Input: cond (N*T, 32, 16, 16), batch_size=N*T
+            # Output: samples (N*T, 2, 16, 16) 
             samples, _ = self.sample_log(
 		        cond=cond_vis_expanded,
 		        batch_size=N * seq_len,
@@ -1729,7 +1732,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 		        eta=ddim_eta
 		    )
 
-        # samples shape: (N*T, 2, 16, 16) - each frame is independently sampled
+        # samples shape: (N*T, 2, 16, 16) - each frame independently denoised
         # decode sampled latent to future sequence
         pred_seq = self.decode_first_stage(samples)   # (N, T, 1, H, W)
 
