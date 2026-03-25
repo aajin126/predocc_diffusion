@@ -1548,52 +1548,39 @@ class PredOccLatentDiffusion(LatentDiffusion):
             raise NotImplementedError(f"encoder_posterior of type '{type(encoder_posterior)}' not yet implemented")
         return self.scale_factor * z
 
-    def get_encoding(self,input_binary_maps, mask_binary_maps = None, input_occ_grid_map = None):
-
+    def get_encoding(self, input_binary_maps, mask_binary_maps=None, input_occ_grid_map=None):
+        """
+        Encoding for PredOcc Diffusion with frame-wise Autoencoder:
+        - input_binary_maps: past sequence (B, T, 1, H, W)
+        - mask_binary_maps: future sequence (B, T, 1, H, W)
+        - Returns: [cond, z]
+          - cond: conditioning from past via ConvLSTM (B, 32, 16, 16)
+          - z: future latent via frame-wise AE (B*T, embed_dim, 16, 16)
+        """
         b, seq_len, _, h, w = input_binary_maps.shape
-        # LDM v1.0 : Using pretrained AE
-        # with torch.no_grad():
-        #     past_posterior = self.encode_first_stage(input_binary_maps, input_occ_grid_map)
-        #     cond = self.scale_factor * past_posterior.mode()
         
-        # LDM v1.2, v1.3 : Using only pretrained temporal AE
-        h_enc, c_enc = self.first_stage_model.temporal_encoder.init_hidden(batch_size=b, image_size=(h, w))
-    
+        # 1) Conditioning: ConvLSTM on past sequence
+        h_enc, c_enc = self.convlstm_cell.init_hidden(batch_size=b, image_size=(h, w))
         for t in range(seq_len):
-            h_enc, c_enc = self.first_stage_model.temporal_encoder(
-                input_tensor=input_binary_maps[:, t],  # (B, C, H, W)
+            h_enc, c_enc = self.convlstm_cell(
+                input_tensor=input_binary_maps[:, t],
                 cur_state=[h_enc, c_enc]
-            )  
-
-        # # LDM v1.1 : Using ConvLSTM for conditioning
-        # h_enc, c_enc = self.convlstm_cell.init_hidden(batch_size=b, image_size=(h, w))
-        # for t in range(seq_len):
-        #     h_enc, c_enc = self.convlstm_cell(
-        #         input_tensor=input_binary_maps[:, t],   
-        #         cur_state=[h_enc, c_enc],
-        #     )
+            )
+        # h_enc : (B, 32, 64, 64)
         
-        # h_enc : (B,32,64,64)
+        # Encoder-based conditioning
+        cond_feat = self.cond_encoder(h_enc)       # (B, 128, 16, 16)
+        cond = self.cond_proj(cond_feat)           # (B, 32, 16, 16)
 
-        # # LDM v1.3 : h_enc + x_map conditioning
-        # cond_in = torch.cat([h_enc, input_occ_grid_map], dim=1)   # (B,33,64,64)
-        # cond_feat = self.cond_encoder(cond_in)
-        # cond = self.cond_proj(cond_feat)
-
-        # LDM v1.1, v1.2 : encoder-based conditioning
-        cond_feat = self.cond_encoder(h_enc)       # (B,128,16,16)
-        cond = self.cond_proj(cond_feat)           # (B,32,16,16)
-
+        # 2) Future sequence -> frame-wise latent
         z = None
-        # 2) future sequence -> sequence AE latent
         if mask_binary_maps is not None:
             with torch.no_grad():
-                # mask_binary_maps: (B, T, 1, H, W)
+                # Frame-wise encode: (B, T, 1, H, W) -> (B*T, embed_dim, 16, 16)
                 encoder_posterior = self.first_stage_model.encode(mask_binary_maps)
-                z = self.get_first_stage_encoding(encoder_posterior)  # (B*T, 2, 16, 16)
+                z = self.get_first_stage_encoding(encoder_posterior)  # (B*T, embed_dim, 16, 16)
 
         out = [cond, z]
-
         return out
 
     @torch.no_grad()
@@ -1610,8 +1597,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
     def forward(self, x, c, *args, **kwargs):
         """
-        x: (B, C_lat, H_lat, W_lat)
-        c: (B, C_cond, H_lat, W_lat)
+        x: (B*T, C_lat, H_lat, W_lat)
+        c: (B*T, C_cond, H_lat, W_lat)
         """
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
         return self.p_losses(x, c, t, *args, **kwargs)
@@ -1715,34 +1702,34 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         log = dict()
 
-        x_in, x_gt, x_occ = self.get_input(batch)
+        x_in, x_gt, _ = self.get_input(batch)
         x_in = x_in[:1]
         x_gt = x_gt[:1]
-        x_occ = x_occ[:1]
         t0 = time.perf_counter()
-        c, z = self.get_encoding(x_in, x_gt, x_occ)
+        c, _ = self.get_encoding(x_in, x_gt)
 		
-        cond_vis = c[:N]
+        cond_vis = c[:N]  # (N, 32, 16, 16)
         x_gt_vis = x_gt[:N]
+		
+        # Expand conditioning for T frames
+        seq_len = self.first_stage_model.seq_len
+        cond_vis_expanded = cond_vis.repeat_interleave(seq_len, dim=0)  # (N*T, 32, 16, 16)
 		
         # DDIM full sampling from random noise -> predicted future latent
         if torch.cuda.is_available():
             torch.cuda.synchronize()
 
         with self.ema_scope("Plotting"):
+            # Sample N*T latents directly (not N then replicate)
             samples, _ = self.sample_log(
-		        cond=cond_vis,
-		        batch_size=N,
+		        cond=cond_vis_expanded,
+		        batch_size=N * seq_len,
 		        ddim=True,
 		        ddim_steps=ddim_steps,
 		        eta=ddim_eta
 		    )
 
-        # samples shape: (N, 2, 16, 16)
-        # decode expects: (B*T, 2, 16, 16) where B=N, T=10
-        # Repeat samples for each timestep
-        samples = samples.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (N*T, 2, 16, 16)
-        
+        # samples shape: (N*T, 2, 16, 16) - each frame is independently sampled
         # decode sampled latent to future sequence
         pred_seq = self.decode_first_stage(samples)   # (N, T, 1, H, W)
 
