@@ -1715,12 +1715,13 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         log = dict()
 
-        x_in, x_gt, x_occ = self.get_input(batch)
+        x_in, x_gt, _ = self.get_input(batch)
         x_in = x_in[:1]
         x_gt = x_gt[:1]
-        x_occ = x_occ[:1]
         t0 = time.perf_counter()
-        c, z = self.get_encoding(x_in, x_gt, x_occ)
+        c, z = self.get_encoding(x_in, x_gt)
+
+        c = c.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (B*T, 32, 16, 16)
 		
         cond_vis = c[:N]
         x_gt_vis = x_gt[:N]
