@@ -103,12 +103,14 @@ lightning:
       params:
         filename: "trainloss-{epoch:06d}"
         monitor: "train/loss_epoch"
-        save_top_k: 5
+        save_top_k: -1
+        every_n_epochs: 10
         save_last: false
 
 
   modelcheckpoint:
     params:
       monitor: "val/loss"
-      save_top_k: 10
+      save_top_k: -1
+      every_n_epochs: 10
       save_last: true
