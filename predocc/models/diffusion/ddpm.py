@@ -1746,11 +1746,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         # decode expects: (B*T, 2, 16, 16) where B=N, T=10
         # Repeat samples for each timestep
         samples = samples.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (N*T, 2, 16, 16)
-<<<<<<< HEAD
         
-=======
-
->>>>>>> bc9a522d850188aa5f83be143687971be7327d71
         # decode sampled latent to future sequence
         pred_seq = self.decode_first_stage(samples)   # (B, T, 1, H, W)
 
