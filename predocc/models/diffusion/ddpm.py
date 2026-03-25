@@ -1722,20 +1722,29 @@ class PredOccLatentDiffusion(LatentDiffusion):
 		
         cond_vis = c[:N]
         x_gt_vis = x_gt[:N]
-		
+
+        # Expand conditioning for T frames
+        seq_len = self.first_stage_model.seq_len
+        cond_vis_expanded = cond_vis.repeat_interleave(seq_len, dim=0)  # (N*T, 32, 16, 16)
+
         # DDIM full sampling from random noise -> predicted future latent
         if torch.cuda.is_available():
             torch.cuda.synchronize()
 
         with self.ema_scope("Plotting"):
             samples, _ = self.sample_log(
-		        cond=cond_vis,
+		        cond=cond_vis_expanded,
 		        batch_size=N,
 		        ddim=True,
 		        ddim_steps=ddim_steps,
 		        eta=ddim_eta
 		    )
 
+        # samples shape: (N, 2, 16, 16)
+        # decode expects: (B*T, 2, 16, 16) where B=N, T=10
+        # Repeat samples for each timestep
+        samples = samples.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (N*T, 2, 16, 16)
+        
         # decode sampled latent to future sequence
         pred_seq = self.decode_first_stage(samples)   # (B, T, 1, H, W)
 
@@ -1746,7 +1755,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         ddim_time = t1 - t0
         self.log("inference_time_sec", ddim_time, prog_bar=False, logger=True, on_step=True, on_epoch=False)
 
-        pred_seq = pred_seq.squeeze(0)  # (T, 1, H, W)
+        pred_seq = pred_seq.squeeze(0)  # (T, 1, H, W) 
         x_gt_vis = x_gt_vis.squeeze(0)  # (T, 1, H, W)
 
         # frame-wise IoU
