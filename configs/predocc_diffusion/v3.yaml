@@ -13,16 +13,16 @@ model:
     monitor: val/loss
     use_ema: True
     convlstm_hidden_dim: 32
-    scale_factor: 0.850896
+    scale_factor: 0.385788
 
-    first_stage_ckpt_path: "./logs/2026-03-20T16-51-28_ae1.0/checkpoints/last.ckpt"
+    first_stage_ckpt_path: "./pretrained_models/first_stage_models/AE/v5.0/model.ckpt"
 
     first_stage_config:
       target: models.autoencoder.SequenceAutoencoderKL
       params:
         embed_dim: 2
         seq_len: 10
-        monitor: val/rec_loss
+        monitor: val/total_loss
         temporal_hidden_dim: 32
         in_channels: 1
         out_ch: 1
@@ -52,7 +52,7 @@ model:
       target: modules.diffusionmodules.openaimodel.UNetModel
       params:
         image_size: 16
-        in_channels: 4  # 34 : x_noisy(2) + cond(32) # 4 : x_noisy(2) + cond(2)
+        in_channels: 34  # 34 : x_noisy(2) + cond(32) # 4 : x_noisy(2) + cond(2)
         out_channels: 2
         model_channels: 128
         attention_resolutions: [4]
@@ -88,9 +88,9 @@ lightning:
     max_epochs: 100
     check_val_every_n_epoch: 1
 
-    accelerator: gpu
-    devices: 2
-    strategy: ddp_find_unused_parameters_true
+    # accelerator: gpu
+    # devices: 2
+    # strategy: ddp_find_unused_parameters_true
     
   callbacks:
     image_logger:
