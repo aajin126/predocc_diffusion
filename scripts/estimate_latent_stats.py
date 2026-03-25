@@ -33,12 +33,12 @@ if "target" in config.model and config.model["target"].startswith("models."):
     config.model["target"] = "predocc." + config.model["target"]
 
 # data root fix
-config.data.params.train.params.data_root = "/home/ewhaglab/develop/data/OGM-datasets/OGM-Turtlebot2/train/"
-config.data.params.validation.params.data_root = "/home/ewhaglab/develop/data/OGM-datasets/OGM-Turtlebot2/val/"
+config.data.params.train.params.data_root = "/home/oem/hj/data/OGM-datasets/OGM-Turtlebot2/train/"
+config.data.params.validation.params.data_root = "/home/oem/hj/data/OGM-datasets/OGM-Turtlebot2/val/"
 
 model = instantiate_from_config(config.model)
 ckpt = torch.load(
-    "/home/ewhaglab/develop/predocc_diffusion/logs/2026-03-20T16-32-43_ae2.0/checkpoints/last.ckpt",
+    "/home/oem/hj/predocc_diffusion/pretrained_models/first_stage_models/AE/v6.0/model.ckpt",
     map_location="cpu",
 )
 state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt

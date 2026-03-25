@@ -609,7 +609,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
                                     stride=1)
         
         self._decoder = Decoder(
-            out_channels=seq_len * self.out_ch,
+            out_channels= self.out_ch,
             num_hiddens=self.num_hiddens,
             num_residual_layers=self.num_residual_layers,
             num_residual_hiddens=self.num_residual_hiddens,
