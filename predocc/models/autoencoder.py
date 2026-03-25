@@ -577,16 +577,8 @@ class SequenceAutoencoderKL(pl.LightningModule):
         self.num_residual_layers = num_residual_layers
         self.num_residual_hiddens = num_residual_hiddens
 
-        # ---------- Temporal encoder ----------
-        self.temporal_encoder = ConvLSTMCell(
-            input_dim=in_channels,
-            hidden_dim=temporal_hidden_dim,
-            kernel_size=(3, 3),
-            bias=True,
-        )
-
         self._encoder = Encoder(
-            in_channels=temporal_hidden_dim,
+            in_channels=in_channels,  # 1 channel per frame
             num_hiddens=self.num_hiddens,
             num_residual_layers=self.num_residual_layers,
             num_residual_hiddens=self.num_residual_hiddens,
@@ -613,7 +605,6 @@ class SequenceAutoencoderKL(pl.LightningModule):
             num_residual_hiddens=self.num_residual_hiddens,
         )
 
-        
         self.loss = instantiate_from_config(lossconfig)
 
         if monitor is not None:
@@ -644,43 +635,27 @@ class SequenceAutoencoderKL(pl.LightningModule):
     def encode(self, x_seq, x_map=None):
         """
         x_seq: (B, T, C, H, W) = (B, 10, 1, 64, 64)
-        returns: posterior over sequence of latents (B*T, 2, 16, 16)
+        returns: posterior over sequence of latents (B*T, embed_dim, 16, 16)
         
-        Pipeline:
-        - ConvLSTM: (B, 10, 1, 64, 64) → h_seq (B, 10, 32, 64, 64)
-        - Reshape: (B, 10, 32, 64, 64) → (B*10, 32, 64, 64)
-        - Encoder: (B*10, 32, 64, 64) → (B*10, 128, 16, 16)
-        - z_mu/z_log_var: (B*10, 2, 16, 16)
+        Pipeline (frame-wise encoding):
+        - Reshape: (B, T, 1, 64, 64) → (B*T, 1, 64, 64)
+        - Encoder: (B*T, 1, 64, 64) → (B*T, 128, 16, 16)
+        - z_mu/z_log_var: (B*T, embed_dim, 16, 16)
         """
         b, t, c, h, w = x_seq.shape
         
-        # Step 1: ConvLSTM forward - generate h_seq (B, 10, 32, 64, 64)
-        h_enc, enc_state = self.temporal_encoder.init_hidden(batch_size=b, image_size=(h, w))
-        h_seq = []
+        # Step 1: Reshape to flatten time dimension
+        x_flat = x_seq.reshape(b * t, c, h, w)  # (B*T, 1, 64, 64)
         
-        for i in range(t):
-            h_enc, enc_state = self.temporal_encoder(
-                input_tensor=x_seq[:, i],
-                cur_state=[h_enc, enc_state],
-            )
-            h_seq.append(h_enc.unsqueeze(1))
+        # Step 2: Encoder
+        feat = self._encoder(x_flat)  # (B*T, 128, 16, 16)
         
-        # h_seq = [(B, 1, 32, 64, 64), (B, 1, 32, 64, 64), ..., (B, 1, 32, 64, 64)]
+        # Step 3: z_mu, z_log_var (per-frame)
+        z_mu = self._encoder_z_mu(feat)       # (B*T, embed_dim, 16, 16)
+        z_log_var = self._encoder_z_log_var(feat)  # (B*T, embed_dim, 16, 16)
         
-        h_seq = torch.cat(h_seq, dim=1)  # (B, T, 32, 64, 64)
-        
-        # Step 2: Reshape (B, T, 32, 64, 64) → (B*T, 32, 64, 64)
-        h_flat = h_seq.reshape(b * t, self.temporal_hidden_dim, h, w)
-        
-        # Step 3: Encoder (B*T, 32, 64, 64) → (B*T, 128, 16, 16)
-        feat = self._encoder(h_flat)
-        
-        # Step 4: z_mu, z_log_var (per-timestep)
-        z_mu = self._encoder_z_mu(feat)       # (B*T, 2, 16, 16)
-        z_log_var = self._encoder_z_log_var(feat)  # (B*T, 2, 16, 16)
-        
-        # Step 5: Create moments for DiagonalGaussianDistribution
-        moments = torch.cat([z_mu, z_log_var], dim=1)  # (B*T, 4, 16, 16)
+        # Step 4: Create moments for DiagonalGaussianDistribution
+        moments = torch.cat([z_mu, z_log_var], dim=1)  # (B*T, 2*embed_dim, 16, 16)
         posterior = DiagonalGaussianDistribution(moments)
         
         return posterior
@@ -786,7 +761,6 @@ class SequenceAutoencoderKL(pl.LightningModule):
         lr = self.learning_rate
 
         opt_ae = torch.optim.Adam(
-            list(self.temporal_encoder.parameters()) +
             list(self._encoder.parameters()) +
             list(self._decoder.parameters()) +
             list(self._encoder_z_mu.parameters()) +
@@ -897,7 +871,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         grid = make_grid(panel, nrow=10, normalize=False, value_range=(0, 1))
 
         grid_np = grid.detach().cpu().permute(1, 2, 0).numpy()
-        
+
         if grid_np.shape[-1] == 1:
             grid_np = grid_np[..., 0]
 
