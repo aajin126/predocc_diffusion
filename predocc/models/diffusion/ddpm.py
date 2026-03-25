@@ -1720,19 +1720,22 @@ class PredOccLatentDiffusion(LatentDiffusion):
         x_gt = x_gt[:1]
         t0 = time.perf_counter()
         c, z = self.get_encoding(x_in, x_gt)
-
-        c = c.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (B*T, 32, 16, 16)
 		
         cond_vis = c[:N]
         x_gt_vis = x_gt[:N]
+
+        # Expand conditioning for T frames
+        seq_len = self.first_stage_model.seq_len
+        cond_vis_expanded = cond_vis.repeat_interleave(seq_len, dim=0)  # (N*T, 32, 16, 16)
 		
         # DDIM full sampling from random noise -> predicted future latent
         if torch.cuda.is_available():
             torch.cuda.synchronize()
 
         with self.ema_scope("Plotting"):
+             # Sample N*T latents directly (not N then replicate)
             samples, _ = self.sample_log(
-		        cond=cond_vis,
+		        cond=cond_vis_expanded,
 		        batch_size=N,
 		        ddim=True,
 		        ddim_steps=ddim_steps,
@@ -1745,8 +1748,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
         samples = samples.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (N*T, 2, 16, 16)
         
         # decode sampled latent to future sequence
-        pred_seq = self.decode_first_stage(samples)   # (N, T, 1, H, W)
-
+        pred_seq = self.decode_first_stage(samples)  # (N, T, 1, H, W)
+        
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         t1 = time.perf_counter() 

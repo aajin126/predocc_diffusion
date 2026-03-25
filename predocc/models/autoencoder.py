@@ -882,7 +882,6 @@ class SequenceAutoencoderKL(pl.LightningModule):
         b, t, c, h, w = x.shape
         xrec, posterior = self(x)                                   # (B,T,C,H,W)
 
-
         # batch 0
         gt_seq = x[0]         # (T,C,H,W)
         rec_seq = xrec[0]     # (T,C,H,W)
