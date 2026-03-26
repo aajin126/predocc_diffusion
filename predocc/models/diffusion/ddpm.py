@@ -1760,7 +1760,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
         vis_list = []
         T = x_gt.shape[1]
         
-        panel = torch.cat([x_gt, pred_seq], dim=0)   # (2T,1,H,W)
+        panel = torch.cat([x_gt, pred_seq], dim=1)   # (B_vis*K, 2T,1,H,W)
+        panel = panel.reshape(-1, 1, 64, 64)            # (B*2T, 1, H, W)
         grid = make_grid(panel, nrow=T, normalize=False, value_range=(0, 1))
         vis_list.append(grid)
         grid_np = grid.detach().cpu().permute(1, 2, 0).numpy()
