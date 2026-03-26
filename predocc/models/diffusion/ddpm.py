@@ -1572,15 +1572,23 @@ class PredOccLatentDiffusion(LatentDiffusion):
         cond_feat = self.cond_encoder(h_enc)       # (B, 128, 16, 16)
         cond = self.cond_proj(cond_feat)           # (B, 32, 16, 16)
 
-        # 2) Future sequence -> frame-wise latent
-        z = None
+        # 2) Past sequence -> conditioning
+        z_past = None
+        if input_binary_maps is not None:
+            with torch.no_grad():
+                # Frame-wise encode: (B, T, 1, H, W) -> (B*T, embed_dim, 16, 16)
+                encoder_posterior = self.first_stage_model.encode(input_binary_maps)
+                z_past = self.get_first_stage_encoding(encoder_posterior)  # (B*T, embed_dim, 16, 16)
+
+        # 3) Future sequence -> frame-wise latent
+        z_future = None
         if mask_binary_maps is not None:
             with torch.no_grad():
                 # Frame-wise encode: (B, T, 1, H, W) -> (B*T, embed_dim, 16, 16)
                 encoder_posterior = self.first_stage_model.encode(mask_binary_maps)
-                z = self.get_first_stage_encoding(encoder_posterior)  # (B*T, embed_dim, 16, 16)
+                z_future = self.get_first_stage_encoding(encoder_posterior)  # (B*T, embed_dim, 16, 16)
 
-        out = [cond, z]
+        out = [cond, z_future, z_past]
         return out
 
     @torch.no_grad()
@@ -1607,11 +1615,11 @@ class PredOccLatentDiffusion(LatentDiffusion):
         
         input_binary_maps, mask_binary_maps, _ = self.get_input(batch)
         
-        cond, z = self.get_encoding(input_binary_maps, mask_binary_maps)
+        cond, z_future, z_past = self.get_encoding(input_binary_maps, mask_binary_maps)
 
         cond = cond.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (B*T, 32, 16, 16)
 
-        loss = self(z, cond) # forward
+        loss = self(z_future, cond) # forward
 
         return loss
 
@@ -1775,9 +1783,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
         print(f"{self.__class__.__name__}: Optimizing diffusion only")
         params = (
             list(self.model.parameters()) +
-            #list(self.convlstm_cell.parameters()) + # LDM v1.1, v1.2
-            list(self.cond_encoder.parameters()) +  # LDM v1.1, v1.2
-            list(self.cond_proj.parameters())       # LDM v1.1, v1.2
+            list(self.convlstm_cell.parameters()) + 
+            list(self.cond_encoder.parameters()) + 
+            list(self.cond_proj.parameters())       
         )
 
 
