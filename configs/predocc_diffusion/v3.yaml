@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 2.0e-04
+  base_learning_rate: 1.0e-04
   target: models.diffusion.ddpm.PredOccLatentDiffusion
   params:
     linear_start: 0.0015
@@ -84,12 +84,12 @@ data:
         
 lightning:
   trainer:
-    max_epochs: 100
+    max_epochs: 80
     check_val_every_n_epoch: 1
 
-    # accelerator: gpu
-    # devices: 2
-    # strategy: ddp_find_unused_parameters_true
+    accelerator: gpu
+    devices: 4
+    strategy: ddp_find_unused_parameters_true
     
   callbacks:
     image_logger:
@@ -103,7 +103,7 @@ lightning:
         filename: "trainloss-{epoch:06d}"
         monitor: "train/loss_epoch"
         save_top_k: -1
-        every_n_epochs: 5
+        every_n_epochs: 10
         save_last: false
 
   modelcheckpoint:

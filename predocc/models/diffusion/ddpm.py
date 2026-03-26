@@ -1764,6 +1764,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         log["GT | RECON | IoU"] = fig
 
+        return log
+    
     def configure_optimizers(self):
         lr = self.learning_rate
 
