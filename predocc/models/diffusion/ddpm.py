@@ -1743,7 +1743,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         # frame-wise IoU
         iou_list = []
         for ti in range(n_row):
-            iou_t = self.compute_iou(pred_seq[ti], x_gt[ti], occ_thr=0.3)
+            iou_t = self.compute_iou(pred_seq[0, ti], x_gt[0, ti], occ_thr=0.3)
             iou_list.append(iou_t.item())
 
         # GT vs DDIM prediction : 2 rows x T cols
