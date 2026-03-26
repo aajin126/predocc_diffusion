@@ -122,22 +122,19 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
             if num_batches is not None and batch_idx >= num_batches:
                 break
             
-            print("batch_size:", batch["scan"].shape[0])
             # Get model inputs z, c, x_gt, xrec, xc
-            x_in, x_gt, x_occ_map, x_rel, y_rel, th_rel = model.get_input(
+            x_in, x_gt, _, x_rel, y_rel, th_rel = model.get_input(
                                                             batch,
                                                             process = 'test'
                                                         )
 
-            print(f"x_in shape: {x_in.shape}, x_gt shape: {x_gt.shape}")
-            
             t0 = time.perf_counter()
             c, _ = model.get_encoding(x_in)
 
-            print(f"cond shape: {c.shape}, cond range: [{c.min():.4f}, {c.max():.4f}]")
-            print(f"x_in range: [{x_in.min():.4f}, {x_in.max():.4f}]")
-            print(f"x_gt range: [{x_gt.min():.4f}, {x_gt.max():.4f}]")
-
+            # Expand conditioning for T frames
+            seq_len = model.first_stage_model.seq_len
+            c_exp = c.repeat_interleave(seq_len, dim=0)  # (N*T, 32, 16, 16)
+            
             # Measure sampling time
             if device.type == "cuda":
                 torch.cuda.synchronize()
@@ -146,19 +143,21 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
             # DDIM sampling from random noise
             with model.ema_scope("Evaluation"):
                 z_samples, _ = model.sample_log(
-                    cond=c,
+                    cond=c_exp,
                     batch_size=num_samples,
                     ddim=True,
                     ddim_steps=ddim_steps,
                     eta=ddim_eta
                 )
+
+            # samples shape: (N, 2, 16, 16)
+            # decode expects: (B*T, 2, 16, 16) where B=N, T=10
+            # Repeat samples for each timestep
+            samples = samples.repeat_interleave(model.first_stage_model.seq_len, dim=0)  # (N*T, 2, 16, 16)
             
             # Decode latent to sequence
             pred_seq = model.decode_first_stage(z_samples)  # (num_samples, T, 1, H, W)
-            
-            print(f"z_samples shape: {z_samples.shape}, range: [{z_samples.min():.4f}, {z_samples.max():.4f}]")
-            print(f"pred_seq shape: {pred_seq.shape}, range: [{pred_seq.min():.4f}, {pred_seq.max():.4f}]")
-            
+
             # Reprojection for each time step
             prediction_maps = torch.zeros(SEQ_LEN, 1, IMG_SIZE, IMG_SIZE).to(device)
 

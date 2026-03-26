@@ -13,9 +13,9 @@ model:
     monitor: val/loss
     use_ema: True
     convlstm_hidden_dim: 32
-    scale_factor: 0.91537
+    scale_factor: 0.385788
 
-    first_stage_ckpt_path: "/home/ewhaglab/develop/predocc_diffusion/models/first_stage_models/AE/v1.0/val_last.ckpt"
+    first_stage_ckpt_path: "/home/ewhaglab/develop/predocc_diffusion/pretrained_models/first_stage_models/AE/v5.0/model.ckpt"
 
     first_stage_config:
       target: models.autoencoder.SequenceAutoencoderKL
