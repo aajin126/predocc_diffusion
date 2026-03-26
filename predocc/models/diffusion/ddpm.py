@@ -1699,14 +1699,18 @@ class PredOccLatentDiffusion(LatentDiffusion):
         B_vis = 1                    # number of condition
         K = N                        # number of multimodal samples
         T = self.first_stage_model.seq_len
+
+        x_in = x_in[:B_vis]
+        x_gt = x_gt[:B_vis]
+
         t0 = time.perf_counter()
         _, z_input = self.get_encoding(x_in, x_gt) # z_input: (B_vis*T, C, H, W)  
 
-        # 1) duplicate condition
-        z_input_exp = z_input.repeat_interleave(K, dim=0)             # (B_vis*K*T, C, H, W)
-
         # Expand input latent for T frames
         seq_len = self.first_stage_model.seq_len
+
+        # 1) duplicate condition
+        z_input_exp = z_input.repeat_interleave(K, dim=0)             # (B_vis*K*T, C, H, W)
 
         # DDIM full sampling from random noise -> predicted future latent per frame
         # batch_size=N*T will generate N*T independent samples
