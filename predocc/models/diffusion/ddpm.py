@@ -11,7 +11,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import time
-from matplotlib import pyplot as plt
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import LambdaLR
 from einops import rearrange, repeat
@@ -1602,10 +1604,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
         _, _, _, h_lat, w_lat = z_full.shape
 
         # 4) latent mask
-        if m is None:
-            m = self.build_sequence_mask(
-                batch_size=b, t_past=seq_len, t_future=seq_len, h_lat=h_lat, w_lat=w_lat, device=self.device
-            )  # (B, T_p+T_f, 1, H_lat, W_lat)
+        m = self.build_sequence_mask(
+            batch_size=b, t_past=seq_len, t_future=seq_len, h_lat=h_lat, w_lat=w_lat, device=self.device
+        )  # (B, T_p+T_f, 1, H_lat, W_lat)
 
         # 5) masked latent input
         z_masked = z_full * m
@@ -1641,10 +1642,10 @@ class PredOccLatentDiffusion(LatentDiffusion):
         
         z_full, z_masked, m, cond = self.get_encoding(input_binary_maps, mask_binary_maps)
 
-        condz = cond.unsqueeze(1)              # (B, 1, 32, 16, 16)
-        cond = cond.expand(-1, self.first_stage_model.seq_len, -1, -1, -1)  # (B, T, 32, 16, 16)
+        cond = cond.unsqueeze(1)              # (B, 1, 32, 16, 16)
+        condz = cond.expand(-1, self.first_stage_model.seq_len, -1, -1, -1)  # (B, T, 32, 16, 16)
 
-        loss = self(z_full, z_masked, m, cond) # forward
+        loss = self(z_full, z_masked, m, condz) # forward
 
         return loss
 
@@ -1800,6 +1801,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         iou_text = "  ".join([f"t{ti+1}:{iou_list[ti]:.3f}" for ti in range(n_row)])
         ax.set_title(f"Frame-wise IoU | {iou_text}", fontsize=12)
+
+        plt.close(fig) 
 
         log["GT | RECON | IoU"] = fig
 

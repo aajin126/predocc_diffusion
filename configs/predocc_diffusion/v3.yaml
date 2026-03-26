@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 2.0e-04
+  base_learning_rate: 1.0e-04
   target: models.diffusion.ddpm.PredOccLatentDiffusion
   params:
     linear_start: 0.0015
@@ -15,7 +15,7 @@ model:
     convlstm_hidden_dim: 32
     scale_factor: 0.385788
 
-    first_stage_ckpt_path: "./pretrained_models/first_stage_models/AE/v5.0/model.ckpt"
+    first_stage_ckpt_path: "./pretrained_models/first_stage_models/AE/v7.0/model.ckpt"
 
     first_stage_config:
       target: models.autoencoder.SequenceAutoencoderKL
@@ -84,7 +84,7 @@ data:
         
 lightning:
   trainer:
-    max_epochs: 100
+    max_epochs: 80
     check_val_every_n_epoch: 1
 
     # accelerator: gpu
