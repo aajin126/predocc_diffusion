@@ -542,7 +542,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
     """
     Sequence VAE:
         input  : (B, T, C, H, W)
-        latent : (B, embed_dim, H_lat, W_lat)
+        latent : (B*T, embed_dim, H_lat, W_lat)
         output : (B, T, C, H, W)
 
     Designed for PredOcc occupancy-map sequences.
