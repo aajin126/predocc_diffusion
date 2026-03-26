@@ -13,7 +13,7 @@ model:
     monitor: val/loss
     use_ema: True
     convlstm_hidden_dim: 32
-    scale_factor: 0.385788
+    scale_factor: 0.374106
 
     first_stage_ckpt_path: "./pretrained_models/first_stage_models/AE/v5.0/model.ckpt"
 

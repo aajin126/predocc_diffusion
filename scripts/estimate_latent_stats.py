@@ -16,7 +16,7 @@ config.data.params.validation.params.data_root = "/home/ewhaglab/develop/data/OG
 
 model = instantiate_from_config(config.model)
 ckpt = torch.load(
-    "/home/ewhaglab/develop/predocc_diffusion/pretrained_models/first_stage_models/AE/v5.0/model.ckpt",
+    "/home/ewhaglab/develop/predocc_diffusion/pretrained_models/first_stage_models/AE/v7.0/model.ckpt",
     map_location="cpu",
 )
 state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt

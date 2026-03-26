@@ -1694,7 +1694,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         return iou
 
     @torch.no_grad()
-    def log_images(self, batch, N=1, n_row=10, sample=True, ddim_steps=50, ddim_eta=1., return_keys=None,
+    def log_images(self, batch, N=1, n_row=10, sample=True, ddim_steps=10, ddim_eta=1., return_keys=None,
                    quantize_denoised=False, inpaint=False, plot_denoise_rows=False, plot_progressive_rows=False,
                    plot_diffusion_rows=False, **kwargs):
 
