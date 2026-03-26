@@ -1703,15 +1703,24 @@ class PredOccLatentDiffusion(LatentDiffusion):
         log = dict()
 
         x_in, x_gt, _ = self.get_input(batch)
-        x_in = x_in[:1]
-        x_gt = x_gt[:1]
+
+        B_vis = 1                    # number of condition
+        K = N                        # number of multimodal samples
+        T = self.first_stage_model.seq_len
+
+        x_in = x_in[:B_vis]
+        x_gt = x_gt[:B_vis]
+
         t0 = time.perf_counter()
         c, _ = self.get_encoding(x_in, x_gt)
 
         seq_len = self.first_stage_model.seq_len
 
-        # Expand conditioning for T frames
-        cond_exp= c.repeat_interleave(seq_len, dim=0)  # (N*T, 32, 16, 16)
+        # 1) duplicate condition
+        c = c.repeat_interleave(K, dim=0)             # (B_vis*K, C, H, W)
+
+        # 2) expand time axis
+        cond_exp = c.repeat_interleave(T, dim=0)      # (B_vis*K*T, C, H, W)
         
         # DDIM full sampling from random noise -> predicted future latent per frame
         # batch_size=N*T will generate N*T independent samples
@@ -1723,16 +1732,16 @@ class PredOccLatentDiffusion(LatentDiffusion):
             # Input: cond (N*T, 32, 16, 16), batch_size=N*T
             # Output: samples (N*T, 2, 16, 16) 
             samples, _ = self.sample_log(
-		        cond=cond_exp,
-		        batch_size=N * seq_len,
-		        ddim=True,
-		        ddim_steps=ddim_steps,
-		        eta=ddim_eta
-		    )
+                cond=cond_exp,
+                batch_size=cond_exp.shape[0],
+                ddim=True,
+                ddim_steps=ddim_steps,
+                eta=ddim_eta
+            )
 
         # samples shape: (N*T, 2, 16, 16) - each frame independently denoised
         # decode sampled latent to future sequence
-        pred_seq = self.decode_first_stage(samples)   # (N, T, 1, H, W)
+        pred_seq = self.decode_first_stage(samples)   # (B_vis*K, T, 1, H, W)
 
         if torch.cuda.is_available():
             torch.cuda.synchronize()
@@ -1744,7 +1753,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         # frame-wise IoU: compare pred_seq and x_gt_vis frame by frame
         iou_list = []
         for ti in range(n_row):
-            iou_t = self.compute_iou(pred_seq[ti], x_gt[ti], occ_thr=0.3)
+            iou_t = self.compute_iou(pred_seq[0, ti], x_gt[0, ti], occ_thr=0.3)
             iou_list.append(iou_t.item())
 
         # GT vs DDIM prediction : 2 rows x T cols
@@ -1768,6 +1777,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         log["GT | RECON | IoU"] = fig
 
+        return log
+
     def configure_optimizers(self):
         lr = self.learning_rate
 
@@ -1775,9 +1786,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
         print(f"{self.__class__.__name__}: Optimizing diffusion only")
         params = (
             list(self.model.parameters()) +
-            #list(self.convlstm_cell.parameters()) + # LDM v1.1, v1.2
-            list(self.cond_encoder.parameters()) +  # LDM v1.1, v1.2
-            list(self.cond_proj.parameters())       # LDM v1.1, v1.2
+            list(self.convlstm_cell.parameters()) + 
+            list(self.cond_encoder.parameters()) + 
+            list(self.cond_proj.parameters())
         )
 
 
