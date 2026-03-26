@@ -1707,14 +1707,15 @@ class PredOccLatentDiffusion(LatentDiffusion):
         x_gt = x_gt[:1]
         t0 = time.perf_counter()
         c, _ = self.get_encoding(x_in, x_gt)
+
+        seq_len = self.first_stage_model.seq_len
 		
         cond_vis = c[:N]  # (N, 32, 16, 16)
-        x_gt_vis = x_gt[:N]
-		
+        x_gt_vis = x_gt[:N]  # (N, T, 1, H, W)
+        
         # Expand conditioning for T frames
-        seq_len = self.first_stage_model.seq_len
         cond_vis_expanded = cond_vis.repeat_interleave(seq_len, dim=0)  # (N*T, 32, 16, 16)
-		
+        
         # DDIM full sampling from random noise -> predicted future latent per frame
         # batch_size=N*T will generate N*T independent samples
         if torch.cuda.is_available():
@@ -1743,7 +1744,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         ddim_time = t1 - t0
         self.log("inference_time_sec", ddim_time, prog_bar=False, logger=True, on_step=True, on_epoch=False)
 
-        # frame-wise IoU
+        # frame-wise IoU: compare pred_seq and x_gt_vis frame by frame
         iou_list = []
         for ti in range(n_row):
             iou_t = self.compute_iou(pred_seq[ti], x_gt_vis[ti], occ_thr=0.3)
