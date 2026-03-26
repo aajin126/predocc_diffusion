@@ -1698,14 +1698,11 @@ class PredOccLatentDiffusion(LatentDiffusion):
         x_in = x_in[:1]
         x_gt = x_gt[:1]
         t0 = time.perf_counter()
-        z, z_input = self.get_encoding(x_in, x_gt)
+        _, z_input = self.get_encoding(x_in, x_gt)
 
         # Expand input latent for T frames
         seq_len = self.first_stage_model.seq_len
 
-        input_viz = z_input[:N*seq_len]  # (N*T, 2, 16, 16)
-        x_gt_vis = x_gt[:N*seq_len]
-		
         # DDIM full sampling from random noise -> predicted future latent per frame
         # batch_size=N*T will generate N*T independent samples
         if torch.cuda.is_available():
@@ -1713,10 +1710,10 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         with self.ema_scope("Plotting"):
             # DDIM samples N*T latents with input latent as condition
-            # Input: input_viz (N*T, 2, 16, 16), batch_size=N*T
+            # Input: z_input (N*T, 2, 16, 16), batch_size=N*T
             # Output: samples (N*T, 2, 16, 16) 
             samples, _ = self.sample_log(
-		        cond=input_viz,
+		        cond=z_input,
 		        batch_size=N * seq_len,
 		        ddim=True,
 		        ddim_steps=ddim_steps,
@@ -1737,17 +1734,17 @@ class PredOccLatentDiffusion(LatentDiffusion):
         # frame-wise IoU
         iou_list = []
         for ti in range(n_row):
-            iou_t = self.compute_iou(pred_seq[ti], x_gt_vis[ti], occ_thr=0.3)
+            iou_t = self.compute_iou(pred_seq[ti], x_gt[ti], occ_thr=0.3)
             iou_list.append(iou_t.item())
 
         # GT vs DDIM prediction : 2 rows x T cols
         vis_list = []
-        T = x_gt_vis.shape[1]
+        T = x_gt.shape[1]
         
-        panel = torch.cat([x_gt_vis, pred_seq], dim=0)   # (2T,1,H,W)
+        panel = torch.cat([x_gt, pred_seq], dim=0)   # (2T,1,H,W)
         grid = make_grid(panel, nrow=T, normalize=False, value_range=(0, 1))
         vis_list.append(grid)
-        grid_np = grid.detach().cpu().permute(1, 2, 0).numpy()
+        grid_np = grid.detach().cpu().permute(1, 2, 0).numpy() 
         
         if grid_np.shape[-1] == 1:
             grid_np = grid_np[..., 0]
