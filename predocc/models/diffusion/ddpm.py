@@ -1709,12 +1709,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
         c, _ = self.get_encoding(x_in, x_gt)
 
         seq_len = self.first_stage_model.seq_len
-		
-        cond_vis = c[:N]  # (N, 32, 16, 16)
-        x_gt_vis = x_gt[:N]  # (N, T, 1, H, W)
-        
+
         # Expand conditioning for T frames
-        cond_vis_expanded = cond_vis.repeat_interleave(seq_len, dim=0)  # (N*T, 32, 16, 16)
+        cond_exp= c.repeat_interleave(seq_len, dim=0)  # (N*T, 32, 16, 16)
         
         # DDIM full sampling from random noise -> predicted future latent per frame
         # batch_size=N*T will generate N*T independent samples
@@ -1726,7 +1723,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
             # Input: cond (N*T, 32, 16, 16), batch_size=N*T
             # Output: samples (N*T, 2, 16, 16) 
             samples, _ = self.sample_log(
-		        cond=cond_vis_expanded,
+		        cond=cond_exp,
 		        batch_size=N * seq_len,
 		        ddim=True,
 		        ddim_steps=ddim_steps,
@@ -1747,14 +1744,14 @@ class PredOccLatentDiffusion(LatentDiffusion):
         # frame-wise IoU: compare pred_seq and x_gt_vis frame by frame
         iou_list = []
         for ti in range(n_row):
-            iou_t = self.compute_iou(pred_seq[ti], x_gt_vis[ti], occ_thr=0.3)
+            iou_t = self.compute_iou(pred_seq[ti], x_gt[ti], occ_thr=0.3)
             iou_list.append(iou_t.item())
 
         # GT vs DDIM prediction : 2 rows x T cols
         vis_list = []
-        T = x_gt_vis.shape[1]
+        T = x_gt.shape[1]
         
-        panel = torch.cat([x_gt_vis, pred_seq], dim=0)   # (2T,1,H,W)
+        panel = torch.cat([x_gt, pred_seq], dim=0)   # (2T,1,H,W)
         grid = make_grid(panel, nrow=T, normalize=False, value_range=(0, 1))
         vis_list.append(grid)
         grid_np = grid.detach().cpu().permute(1, 2, 0).numpy()
