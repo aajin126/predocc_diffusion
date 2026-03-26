@@ -1548,6 +1548,12 @@ class PredOccLatentDiffusion(LatentDiffusion):
             raise NotImplementedError(f"encoder_posterior of type '{type(encoder_posterior)}' not yet implemented")
         return self.scale_factor * z
 
+    def build_sequence_mask(self, batch_size, t_past, h_lat, w_lat, t_future, device):
+        m_past = torch.ones(batch_size, t_past, 1, h_lat, w_lat, device=device)
+        m_future = torch.zeros(batch_size, t_future, 1, h_lat, w_lat, device=device)
+        return torch.cat([m_past, m_future], dim=1)
+
+
     def get_encoding(self, input_binary_maps, mask_binary_maps=None, input_occ_grid_map=None):
         """
         Encoding for PredOcc Diffusion with frame-wise Autoencoder:
@@ -1579,6 +1585,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
                 # Frame-wise encode: (B, T, 1, H, W) -> (B*T, embed_dim, 16, 16)
                 encoder_posterior = self.first_stage_model.encode(input_binary_maps)
                 z_past = self.get_first_stage_encoding(encoder_posterior)  # (B*T, embed_dim, 16, 16)
+                z_past = rearrange(z_past, '(b t) c h w -> b t c h w', b=b, t=seq_len) # (B, T, embed_dim, 16, 16)
 
         # 3) Future sequence -> frame-wise latent
         z_future = None
@@ -1587,8 +1594,25 @@ class PredOccLatentDiffusion(LatentDiffusion):
                 # Frame-wise encode: (B, T, 1, H, W) -> (B*T, embed_dim, 16, 16)
                 encoder_posterior = self.first_stage_model.encode(mask_binary_maps)
                 z_future = self.get_first_stage_encoding(encoder_posterior)  # (B*T, embed_dim, 16, 16)
+                z_future = rearrange(z_future, '(b t) c h w -> b t c h w', b=b, t=seq_len) # (B, T, embed_dim, 16, 16)
 
-        out = [cond, z_future, z_past]
+        # 3) full sequence latent
+        z_full = torch.cat([z_past, z_future], dim=1)
+
+        _, _, _, h_lat, w_lat = z_full.shape
+
+        # 4) latent mask
+        if m is None:
+            m = self.build_sequence_mask(
+                batch_size=b, t_past=seq_len, t_future=seq_len, h_lat=h_lat, w_lat=w_lat, device=self.device
+            )  # (B, T_p+T_f, 1, H_lat, W_lat)
+
+        # 5) masked latent input
+        z_masked = z_full * m
+
+
+        out = [z_full, z_masked, m, cond]
+        
         return out
 
     @torch.no_grad()
@@ -1603,23 +1627,24 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         return self.first_stage_model.decode(z)
 
-    def forward(self, x, c, *args, **kwargs):
+    def forward(self, z_full, z_masked, m, c, *args, **kwargs):
         """
-        x: (B*T, C_lat, H_lat, W_lat)
-        c: (B*T, C_cond, H_lat, W_lat)
+        x: (B, T, C, H_lat, W_lat)
+        c: (B, T, C, H_lat, W_lat)
         """
-        t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
-        return self.p_losses(x, c, t, *args, **kwargs)
+        t = torch.randint(0, self.num_timesteps, (z_full.shape[0],), device=self.device).long()
+        return self.p_losses(z_full, z_masked, m, c, t, *args, **kwargs)
 
     def shared_step(self, batch, **kwargs):
         
         input_binary_maps, mask_binary_maps, _ = self.get_input(batch)
         
-        cond, z_future, z_past = self.get_encoding(input_binary_maps, mask_binary_maps)
+        z_full, z_masked, m, cond = self.get_encoding(input_binary_maps, mask_binary_maps)
 
-        cond = cond.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (B*T, 32, 16, 16)
+        condz = cond.unsqueeze(1)              # (B, 1, 32, 16, 16)
+        cond = cond.expand(-1, self.first_stage_model.seq_len, -1, -1, -1)  # (B, T, 32, 16, 16)
 
-        loss = self(z_future, cond) # forward
+        loss = self(z_full, z_masked, m, cond) # forward
 
         return loss
 
@@ -1649,10 +1674,12 @@ class PredOccLatentDiffusion(LatentDiffusion):
         self.log_dict(loss_dict_no_ema, prog_bar=False, logger=True, on_step=False, on_epoch=True)
         self.log_dict(loss_dict_ema, prog_bar=False, logger=True, on_step=False, on_epoch=True)
 
-    def p_losses(self, x_start, cond, t, noise=None):
+    def p_losses(self, z_full, z_masked, m, cond, t, noise=None):
         """
-        x_start: (B, C_lat, H_lat, W_lat)
-        cond:    (B, C_cond, H_lat, W_lat)
+        z_full: (B, 2T, C, H_lat, W_lat)
+        z_masked: (B, 2T, C, H_lat, W_lat)
+        m: (B, 2T, C, H_lat, W_lat)
+        cond: (B, T, C, H_lat, W_lat)
         """
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
@@ -1714,7 +1741,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         x_in = x_in[:1]
         x_gt = x_gt[:1]
         t0 = time.perf_counter()
-        c, _ = self.get_encoding(x_in, x_gt)
+        z_full, z_masked, m_latent, cond = self.get_encoding(x_in, x_gt)
 
         seq_len = self.first_stage_model.seq_len
 
