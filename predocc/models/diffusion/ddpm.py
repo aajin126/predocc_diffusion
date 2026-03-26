@@ -1695,10 +1695,15 @@ class PredOccLatentDiffusion(LatentDiffusion):
         log = dict()
 
         x_in, x_gt, _ = self.get_input(batch)
-        x_in = x_in[:1]
-        x_gt = x_gt[:1]
+
+        B_vis = 1                    # number of condition
+        K = N                        # number of multimodal samples
+        T = self.first_stage_model.seq_len
         t0 = time.perf_counter()
-        _, z_input = self.get_encoding(x_in, x_gt)
+        _, z_input = self.get_encoding(x_in, x_gt) # z_input: (B_vis*T, C, H, W)  
+
+        # 1) duplicate condition
+        z_input_exp = z_input.repeat_interleave(K, dim=0)             # (B_vis*K*T, C, H, W)
 
         # Expand input latent for T frames
         seq_len = self.first_stage_model.seq_len
@@ -1713,8 +1718,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
             # Input: z_input (N*T, 2, 16, 16), batch_size=N*T
             # Output: samples (N*T, 2, 16, 16) 
             samples, _ = self.sample_log(
-		        cond=z_input,
-		        batch_size=N * seq_len,
+		        cond=z_input_exp,
+		        batch_size=z_input_exp.shape[0],
 		        ddim=True,
 		        ddim_steps=ddim_steps,
 		        eta=ddim_eta
@@ -1722,7 +1727,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         # samples shape: (N*T, 2, 16, 16) - each frame independently denoised
         # decode sampled latent to future sequence
-        pred_seq = self.decode_first_stage(samples)   # (N, T, 1, H, W)
+        pred_seq = self.decode_first_stage(samples)   # (B_vis*K, T, 1, H, W)
 
         if torch.cuda.is_available():
             torch.cuda.synchronize()
