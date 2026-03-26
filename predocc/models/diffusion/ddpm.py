@@ -11,7 +11,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import time
-from matplotlib import pyplot as plt
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import LambdaLR
 from einops import rearrange, repeat
@@ -1775,6 +1777,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         iou_text = "  ".join([f"t{ti+1}:{iou_list[ti]:.3f}" for ti in range(n_row)])
         ax.set_title(f"Frame-wise IoU | {iou_text}", fontsize=12)
+
+        plt.close(fig)
 
         log["GT | RECON | IoU"] = fig
 
