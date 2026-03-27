@@ -1583,6 +1583,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
                 z = self.get_first_stage_encoding(encoder_posterior)  # (B*T, embed_dim, 16, 16)
 
         out = [cond, z]
+        
         return out
 
     @torch.no_grad()
