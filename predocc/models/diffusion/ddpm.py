@@ -1697,18 +1697,16 @@ class PredOccLatentDiffusion(LatentDiffusion):
         log = dict()
 
         x_in, x_gt, x_occ = self.get_input(batch)
-        x_in = x_in[:N]
-        x_gt = x_gt[:N]
-        x_occ = x_occ[:N]
-        t0 = time.perf_counter()
-        c, z = self.get_encoding(x_in, x_gt, x_occ)
-		
-        cond_vis = c[:N]
-        x_gt_vis = x_gt[:N]
+        B_vis = 1                    # number of condition
+        K = N                        # number of multimodal samples
+        T = self.first_stage_model.seq_len
 
-        # Expand conditioning for T frames
-        seq_len = self.first_stage_model.seq_len
-        cond_vis_expanded = cond_vis.repeat_interleave(seq_len, dim=0)  # (N*T, 32, 16, 16)
+        x_in = x_in[:B_vis]
+        x_gt = x_gt[:B_vis]
+        x_occ = x_occ[:B_vis]
+
+        t0 = time.perf_counter()
+        c, _ = self.get_encoding(x_in, x_gt, x_occ)
 
         # DDIM full sampling from random noise -> predicted future latent
         if torch.cuda.is_available():
@@ -1716,7 +1714,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         with self.ema_scope("Plotting"):
             samples, _ = self.sample_log(
-		        cond=cond_vis_expanded,
+		        cond=c,
 		        batch_size=N,
 		        ddim=True,
 		        ddim_steps=ddim_steps,
@@ -1734,19 +1732,19 @@ class PredOccLatentDiffusion(LatentDiffusion):
         self.log("inference_time_sec", ddim_time, prog_bar=False, logger=True, on_step=True, on_epoch=False)
 
         pred_seq = pred_seq.squeeze(0)  # (T, 1, H, W) 
-        x_gt_vis = x_gt_vis.squeeze(0)  # (T, 1, H, W)
+        x_gt = x_gt.squeeze(0)  # (T, 1, H, W)
 
         # frame-wise IoU
         iou_list = []
         for ti in range(n_row):
-            iou_t = self.compute_iou(pred_seq[ti], x_gt_vis[ti], occ_thr=0.3)
+            iou_t = self.compute_iou(pred_seq[ti], x_gt[ti], occ_thr=0.3)
             iou_list.append(iou_t.item())
 
         # GT vs DDIM prediction : 2 rows x T cols
         vis_list = []
-        T = x_gt_vis.shape[0]
+        T = x_gt.shape[0]
 
-        panel = torch.cat([x_gt_vis, pred_seq], dim=0)   # (2T,1,H,W)
+        panel = torch.cat([x_gt, pred_seq], dim=0)   # (2T,1,H,W)
         grid = make_grid(panel, nrow=T, normalize=False, value_range=(0, 1))
         vis_list.append(grid)
         grid_np = grid.detach().cpu().permute(1, 2, 0).numpy()
