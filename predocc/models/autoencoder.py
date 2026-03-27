@@ -609,21 +609,23 @@ class SequenceAutoencoderKL(pl.LightningModule):
                                     out_channels=num_hiddens,
                                     kernel_size=1, 
                                     stride=1)
-        
+
+        # ---------- Temporal decoder ----------
+        self.temporal_decoder = ConvLSTMCell(
+            input_dim=num_hiddens,
+            hidden_dim=num_hiddens,
+            kernel_size=(3, 3),
+            bias=True,
+        )       
+
         self._decoder = Decoder(
-            out_channels=decoder_hidden_dim,
+            out_channels=self.out_ch,
             num_hiddens=self.num_hiddens,
             num_residual_layers=self.num_residual_layers,
             num_residual_hiddens=self.num_residual_hiddens,
         )
 
-        # ---------- Temporal decoder ----------
-        self.temporal_decoder = ConvLSTMCell(
-            input_dim=decoder_hidden_dim,
-            hidden_dim=decoder_hidden_dim,
-            kernel_size=(3, 3),
-            bias=True,
-        )        
+ 
         
         self.loss = instantiate_from_config(lossconfig)
 
@@ -883,9 +885,8 @@ class SequenceAutoencoderKL(pl.LightningModule):
     def log_images(self, batch, only_inputs=False, **kwargs):
         """
         Returns:
-            inputs:          (B*T, C, H, W) for easy grid logging
-            reconstructions: (B*T, C, H, W)
-            samples:         (B*T, C, H, W)
+            inputs:          (B, T, C, H, W)
+            reconstructions: (B, T, C, H, W)
         """
         log = dict()
         x, x_map = self.get_input(batch, self.image_key)
@@ -900,7 +901,6 @@ class SequenceAutoencoderKL(pl.LightningModule):
         # batch 0
         gt_seq = x[0]         # (T,C,H,W)
         rec_seq = xrec[0]     # (T,C,H,W)
-        samp_seq = samples[0] # (T,C,H,W)
 
         # frame-wise IoU
         iou_list = []
@@ -908,7 +908,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
             iou_t = self.compute_iou(rec_seq[ti], gt_seq[ti], occ_thr=0.3)
             iou_list.append(iou_t.item())
 
-        panel = torch.cat([gt_seq, rec_seq, samp_seq], dim=0)       # (3T,C,H,W)
+        panel = torch.cat([gt_seq, rec_seq], dim=0)       # (2T,C,H,W)
         grid = make_grid(panel, nrow=10, normalize=False, value_range=(0, 1))
 
         grid_np = grid.detach().cpu().permute(1, 2, 0).numpy()
@@ -923,7 +923,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         iou_text = "  ".join([f"t{ti+1}:{iou_list[ti]:.3f}" for ti in range(t)])
         ax.set_title(f"Frame-wise IoU | {iou_text}", fontsize=12)
 
-        log["GT | RECON | SAMPLE | IoU"] = fig
+        log["GT | RECON | IoU"] = fig
 
         return log
 
