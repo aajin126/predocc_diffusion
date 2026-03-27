@@ -33,25 +33,18 @@ class AELoss(nn.Module):
         seq_len = 10
         B = inputs.shape[0]
 
-        # same frame weighting as train.py
-        end_w = 0.5
-        w = torch.linspace(1.0, end_w, steps=seq_len, device=inputs.device)
-
         ce_loss = 0.0
-        w_sum = 0.0
 
         for k in range(seq_len):
-            w_k = w[k]
 
-            ce_loss = ce_loss + w_k * torch.nn.functional.binary_cross_entropy(
+            ce_loss = ce_loss + torch.nn.functional.binary_cross_entropy(
                 reconstructions[:, k],
                 inputs[:, k],
                 reduction="sum"
             ).div(B)
 
-            w_sum = w_sum + w_k
 
-        ce_loss = ce_loss / w_sum
+        ce_loss = ce_loss / seq_len
 
         kl_loss = posteriors.kl().mean()
 
