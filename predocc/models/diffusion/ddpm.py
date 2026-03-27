@@ -1562,13 +1562,14 @@ class PredOccLatentDiffusion(LatentDiffusion):
             )  
         # h_enc : (B,32,64,64)
 
-        # LDM v1.3 : h_enc + x_map conditioning
+        # h_enc + x_map conditioning
         cond_in = torch.cat([h_enc, input_occ_grid_map], dim=1)   # (B,33,64,64)
         cond_feat = self.first_stage_model._encoder(cond_in)
         cond = self.cond_proj(cond_feat)
 
         z = None
-        # 2) future sequence -> sequence AE latent
+        
+        # future sequence -> sequence AE latent
         if mask_binary_maps is not None:
             with torch.no_grad():
                 encoder_posterior = self.encode_first_stage(mask_binary_maps, input_occ_grid_map)  # sequence input
@@ -1592,8 +1593,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
     def forward(self, x, c, *args, **kwargs):
         """
-        x: (B*T, C_lat, H_lat, W_lat)
-        c: (B*T, C_cond, H_lat, W_lat)
+        x: (B, C_lat, H_lat, W_lat)
+        c: (B, C_cond, H_lat, W_lat)
         """
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
         return self.p_losses(x, c, t, *args, **kwargs)
@@ -1603,8 +1604,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
         input_binary_maps, mask_binary_maps, input_occ_grid_map = self.get_input(batch)
         
         cond, z = self.get_encoding(input_binary_maps, mask_binary_maps, input_occ_grid_map)
-
-        cond = cond.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (B*T, 32, 16, 16)
 
         loss = self(z, cond) # forward
 
@@ -1638,8 +1637,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
     def p_losses(self, x_start, cond, t, noise=None):
         """
-        x_start: (B*T, C_lat, H_lat, W_lat)
-        cond:    (B*T, C_cond, H_lat, W_lat)
+        x_start: (B, C_lat, H_lat, W_lat)
+        cond:    (B, C_cond, H_lat, W_lat)
         """
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
@@ -1718,13 +1717,13 @@ class PredOccLatentDiffusion(LatentDiffusion):
         with self.ema_scope("Plotting"):
             samples, _ = self.sample_log(
 		        cond=cond_vis_expanded,
-		        batch_size=N*seq_len,
+		        batch_size=N,
 		        ddim=True,
 		        ddim_steps=ddim_steps,
 		        eta=ddim_eta
 		    )
 
-        # samples shape: (N*T, 2, 16, 16)
+        # samples shape: (N, 2, 16, 16)
         pred_seq = self.decode_first_stage(samples)   # (B, T, 1, H, W)
 
         if torch.cuda.is_available():
