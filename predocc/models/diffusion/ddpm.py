@@ -1610,8 +1610,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
     def forward(self, x, c, *args, **kwargs):
         """
-        x: (B, C_lat, H_lat, W_lat)
-        c: (B, C_cond, H_lat, W_lat)
+        x: (B*T, C_lat, H_lat, W_lat)
+        c: (B*T, C_cond, H_lat, W_lat)
         """
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
         return self.p_losses(x, c, t, *args, **kwargs)
@@ -1656,8 +1656,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
     def p_losses(self, x_start, cond, t, noise=None):
         """
-        x_start: (B, C_lat, H_lat, W_lat)
-        cond:    (B, C_cond, H_lat, W_lat)
+        x_start: (B*T, C_lat, H_lat, W_lat)
+        cond:    (B*T, C_cond, H_lat, W_lat)
         """
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
@@ -1736,18 +1736,13 @@ class PredOccLatentDiffusion(LatentDiffusion):
         with self.ema_scope("Plotting"):
             samples, _ = self.sample_log(
 		        cond=cond_vis_expanded,
-		        batch_size=N,
+		        batch_size=N*seq_len,
 		        ddim=True,
 		        ddim_steps=ddim_steps,
 		        eta=ddim_eta
 		    )
 
-        # samples shape: (N, 2, 16, 16)
-        # decode expects: (B*T, 2, 16, 16) where B=N, T=10
-        # Repeat samples for each timestep
-        samples = samples.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (N*T, 2, 16, 16)
-        
-        # decode sampled latent to future sequence
+        # samples shape: (N*T, 2, 16, 16)
         pred_seq = self.decode_first_stage(samples)   # (B, T, 1, H, W)
 
         if torch.cuda.is_available():
