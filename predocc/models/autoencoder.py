@@ -557,7 +557,6 @@ class SequenceAutoencoderKL(pl.LightningModule):
         out_ch=1,
         resolution=64,
         temporal_hidden_dim=32,
-        decoder_hidden_dim=32,
         map_channels=1,
         num_hiddens=128,
         num_residual_layers=2,
@@ -572,7 +571,6 @@ class SequenceAutoencoderKL(pl.LightningModule):
         self.embed_dim = embed_dim
         self.seq_len = seq_len
         self.temporal_hidden_dim = temporal_hidden_dim
-        self.decoder_hidden_dim = decoder_hidden_dim
         self.map_channels = map_channels
         self.in_channels = in_channels
         self.out_ch = out_ch

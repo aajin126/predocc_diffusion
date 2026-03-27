@@ -85,7 +85,7 @@ data:
         
 lightning:
   trainer:
-    max_epochs: 100
+    max_epochs: 60
     check_val_every_n_epoch: 1
 
   callbacks:
