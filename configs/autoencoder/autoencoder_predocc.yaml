@@ -3,7 +3,7 @@ model:
   target: models.autoencoder.SequenceAutoencoderKL 
   params:
     monitor: "val/total_loss"
-    embed_dim: 2
+    embed_dim: 8
     seq_len: 10  
     temporal_hidden_dim: 32
     map_channels: 1

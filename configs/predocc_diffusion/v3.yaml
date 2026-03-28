@@ -7,7 +7,7 @@ model:
     log_every_t: 200
     timesteps: 1000
     image_size: 16
-    channels: 2
+    channels: 8 #2
     conditioning_key: concat
     parameterization: eps
     monitor: val/loss
@@ -20,7 +20,7 @@ model:
     first_stage_config:
       target: models.autoencoder.SequenceAutoencoderKL
       params:
-        embed_dim: 2
+        embed_dim: 8
         seq_len: 10
         monitor: val/rec_loss
         temporal_hidden_dim: 32
@@ -53,8 +53,8 @@ model:
       target: modules.diffusionmodules.openaimodel.UNetModel
       params:
         image_size: 16
-        in_channels: 35 # 35 = x_noisy(2) + cond(33) 34 = x_noisy(2) + cond(32) # 4 = x_noisy(2) + cond(2)
-        out_channels: 2
+        in_channels: 41 # 35 = x_noisy(2) + cond(33) 34 = x_noisy(2) + cond(32) # 4 = x_noisy(2) + cond(2)
+        out_channels: 8 #2
         model_channels: 128
         attention_resolutions: [4]
         num_res_blocks: 1

@@ -41,7 +41,7 @@ os.makedirs(output_dir, exist_ok=True)
 
 config = OmegaConf.load("configs/autoencoder/ae_eval.yaml")
 model = instantiate_from_config(config.model)
-ckpt = torch.load("logs/2026-03-24T12-08-16_ae2.0_kl_test/checkpoints/last.ckpt", map_location="cpu")
+ckpt = torch.load("logs/2026-03-27T17-09-28_ae2.0.1/checkpoints/last.ckpt", map_location="cpu")
 state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
 model.load_state_dict(state_dict, strict=False)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
