@@ -40,7 +40,7 @@ MAP_Y_LIMIT = [-3.2, 3.2]   # Map limits on the y-axis
 RESOLUTION = 0.1        # Grid resolution in [m]'
 TRESHOLD_P_OCC = 0.8    # Occupancy threshold
 all_rows = []    
-csv_path = os.path.join("output", "v6.2.0_10", "eval_table.csv")
+csv_path = os.path.join("output", "v6.2.1", "eval_table.csv")
 
 def compute_iou(pred, gt, occ_thr=0.3):
     pred_occ = (pred > occ_thr)
