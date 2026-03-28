@@ -424,11 +424,7 @@ class DDPM(pl.LightningModule):
 
     def configure_optimizers(self):
         lr = self.learning_rate
-        params = (
-                list(self.model.parameters())+
-                list(self.convlstm_cell.parameters()) +
-                list(self.cond_encoder.parameters()) +
-                list(self.cond_proj.parameters()))
+        params = (list(self.model.parameters()))
         
         if self.learn_logvar:
             params = params + [self.logvar]
@@ -1447,12 +1443,12 @@ class PredOccLatentDiffusion(LatentDiffusion):
         if self.first_stage_ckpt_path is not None:
             self.load_first_stage(self.first_stage_ckpt_path)
 
-        self.convlstm_cell = ConvLSTMCell(
-            input_dim=1,
-            hidden_dim=self.convlstm_hidden_dim,   # 32
-            kernel_size=(3, 3),
-            bias=True,
-        )
+        # self.convlstm_cell = ConvLSTMCell(
+        #     input_dim=1,
+        #     hidden_dim=self.convlstm_hidden_dim,   # 32
+        #     kernel_size=(3, 3),
+        #     bias=True,
+        # )
 
         self.cond_encoder = Encoder(
             in_channels=self.convlstm_hidden_dim,  # 32
