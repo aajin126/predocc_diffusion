@@ -1564,7 +1564,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         # h_enc + x_map conditioning
         cond_in = torch.cat([h_enc, input_occ_grid_map], dim=1)   # (B,33,64,64)
-        cond_feat = self.first_stage_model._encoder(cond_in)
+        cond_feat = self.cond_encoder(cond_in)
         cond = self.cond_proj(cond_feat)
 
         z = None
