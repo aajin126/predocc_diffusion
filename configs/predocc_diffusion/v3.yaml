@@ -99,7 +99,7 @@ lightning:
       target: pytorch_lightning.callbacks.ModelCheckpoint
       params:
         filename: "trainloss-{epoch:06d}"
-        monitor: "train/loss_epoch"
+        monitor: "train/loss_simple_epoch"
         save_top_k: -1
         every_n_epochs: 10
         save_last: false
