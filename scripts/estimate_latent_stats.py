@@ -38,7 +38,7 @@ config.data.params.validation.params.data_root = "/home/oem/hj/data/OGM-datasets
 
 model = instantiate_from_config(config.model)
 ckpt = torch.load(
-    "/home/oem/hj/predocc_diffusion_v0/pretrained_models/first_stage_models/AE/v2.1/model.ckpt",
+    "/home/oem/hj/predocc_diffusion_v1/pretrained_models/first_stage_models/AE/v2.1/model.ckpt",
     map_location="cpu",
 )
 state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt

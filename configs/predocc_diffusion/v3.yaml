@@ -52,7 +52,7 @@ model:
       target: modules.diffusionmodules.openaimodel.UNetModel
       params:
         image_size: 16
-        in_channels: 4  # 34 : x_noisy(2) + cond(32) # 4 : x_noisy(2) + cond(2)
+        in_channels: 34  # 34 : x_noisy(2) + cond(32) # 4 : x_noisy(2) + cond(2)
         out_channels: 2
         model_channels: 128
         attention_resolutions: [4]
@@ -85,7 +85,7 @@ data:
         
 lightning:
   trainer:
-    max_epochs: 60
+    max_epochs: 80
     check_val_every_n_epoch: 1
 
   callbacks:
@@ -93,7 +93,16 @@ lightning:
       target: main.ImageLogger
       params:
         batch_frequency: 50
-    
+
+    train_loss_epoch_checkpoint:
+      target: pytorch_lightning.callbacks.ModelCheckpoint
+      params:
+        filename: "trainloss-{epoch:06d}"
+        monitor: "train/loss_simple_epoch"
+        save_top_k: -1
+        every_n_epochs: 10
+        save_last: false
+
     train_loss_epoch_checkpoint:
       target: pytorch_lightning.callbacks.ModelCheckpoint
       params:
