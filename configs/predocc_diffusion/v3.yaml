@@ -12,10 +12,10 @@ model:
     parameterization: eps
     monitor: val/loss
     use_ema: True
-    convlstm_hidden_dim: 32
-    scale_factor: 0.91537
+    convlstm_hidden_dim: 33
+    scale_factor: 0.416507
 
-    first_stage_ckpt_path: "./models/first_stage_models/AE/v2.1/model.ckpt"
+    first_stage_ckpt_path: "./pretrained_models/first_stage_models/AE/v2.1/model.ckpt"
 
     first_stage_config:
       target: models.autoencoder.SequenceAutoencoderKL
@@ -52,7 +52,7 @@ model:
       target: modules.diffusionmodules.openaimodel.UNetModel
       params:
         image_size: 16
-        in_channels: 34  # 34 : x_noisy(2) + cond(32) # 4 : x_noisy(2) + cond(2)
+        in_channels: 35  # 34 : x_noisy(2) + cond(32) # 4 : x_noisy(2) + cond(2)
         out_channels: 2
         model_channels: 128
         attention_resolutions: [4]
@@ -102,15 +102,6 @@ lightning:
         save_top_k: -1
         every_n_epochs: 10
         save_last: false
-
-    train_loss_epoch_checkpoint:
-      target: pytorch_lightning.callbacks.ModelCheckpoint
-      params:
-        filename: "trainloss-{epoch:06d}"
-        monitor: "train/loss_epoch"
-        save_top_k: 5
-        save_last: false
-
 
   modelcheckpoint:
     params:

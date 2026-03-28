@@ -21,6 +21,7 @@ from torchvision.utils import make_grid
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.optim.lr_scheduler import LambdaLR
 import types
+from matplotlib import pyplot as plt
 
 from data.data_preprocessing import SEQ_LEN, preprocess_batch, preprocess_batch_test
 from util import log_txt_as_img, exists, default, ismap, isimage, mean_flat, count_params, instantiate_from_config
@@ -423,11 +424,7 @@ class DDPM(pl.LightningModule):
 
     def configure_optimizers(self):
         lr = self.learning_rate
-        params = (
-                list(self.model.parameters())+
-                list(self.convlstm_cell.parameters()) +
-                list(self.cond_encoder.parameters()) +
-                list(self.cond_proj.parameters()))
+        params = (list(self.model.parameters()))
         
         if self.learn_logvar:
             params = params + [self.logvar]
@@ -1446,13 +1443,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
         if self.first_stage_ckpt_path is not None:
             self.load_first_stage(self.first_stage_ckpt_path)
 
-        self.convlstm_cell = ConvLSTMCell(
-            input_dim=1,
-            hidden_dim=self.convlstm_hidden_dim,   # 32
-            kernel_size=(3, 3),
-            bias=True,
-        )
-
         self.cond_encoder = Encoder(
             in_channels=self.convlstm_hidden_dim,  # 32
             num_hiddens=128,
@@ -1665,7 +1655,17 @@ class PredOccLatentDiffusion(LatentDiffusion):
         
         return loss, loss_dict
 
+    @staticmethod
+    def compute_iou(pred, gt, occ_thr=0.3):
+        pred_occ = (pred > occ_thr)
+        gt_occ   = (gt > occ_thr)
 
+        inter = (pred_occ & gt_occ).sum().float()
+        union = (pred_occ | gt_occ).sum().float()
+
+        iou = inter / (union + 1e-6)
+
+        return iou
 
     @torch.no_grad()
     def log_images(self, batch, N=1, n_row=10, sample=True, ddim_steps=10, ddim_eta=1., return_keys=None,
