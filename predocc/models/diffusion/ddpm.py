@@ -1773,9 +1773,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
         print(f"{self.__class__.__name__}: Optimizing diffusion only")
         params = (
             list(self.model.parameters()) +
-            # list(self.convlstm_cell.parameters()) + # LDM v1.1
-            list(self.cond_encoder.parameters()) +  # LDM v1.1, v1.2, v1.3
-            list(self.cond_proj.parameters())       # LDM v1.1, v1.2, v1.3
+            list(self.cond_encoder.parameters()) + 
+            list(self.cond_proj.parameters())     
         )
 
 
