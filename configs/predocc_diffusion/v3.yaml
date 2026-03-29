@@ -87,9 +87,9 @@ lightning:
     max_epochs: 80
     check_val_every_n_epoch: 1
 
-    accelerator: gpu
-    devices: 4
-    strategy: ddp_find_unused_parameters_true
+    # accelerator: gpu
+    # devices: 4
+    # strategy: ddp_find_unused_parameters_true
     
   callbacks:
     image_logger:
