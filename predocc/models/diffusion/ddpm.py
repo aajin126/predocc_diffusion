@@ -1451,7 +1451,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         self.convlstm_cell = ConvLSTMCell(
             input_dim=1,
-            hidden_dim=self.convlstm_hidden_dim,   # 32
+            hidden_dim=self.convlstm_hidden_dim - 1,   # 32
             kernel_size=(3, 3),
             bias=True,
         )
@@ -1491,6 +1491,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
             x_rel = maps["x_rel"]                                  # (B,T)
             y_rel = maps["y_rel"]                                  # (B,T)
             th_rel = maps["th_rel"]                                # (B,T)
+            input_occ_grid_map = input_occ_grid_map.reshape(-1, 1, IMG_SIZE, IMG_SIZE)
 
             
             out = [input_binary_maps, mask_binary_maps, input_occ_grid_map, x_rel, y_rel, th_rel]
@@ -1568,10 +1569,11 @@ class PredOccLatentDiffusion(LatentDiffusion):
                 input_tensor=input_binary_maps[:, t],
                 cur_state=[h_enc, c_enc]
             )
-        # h_enc : (B, 32, 64, 64)
-        
-        # Encoder-based conditioning
-        cond_feat = self.cond_encoder(h_enc)       # (B, 128, 16, 16)
+        # h_enc : (B,32,64,64)
+
+        # h_enc + x_map conditioning
+        cond_in = torch.cat([h_enc, input_occ_grid_map], dim=1)   # (B,33,64,64)
+        cond_feat = self.cond_encoder(cond_in)
         cond = self.cond_proj(cond_feat)           # (B, 32, 16, 16)
 
         # 2) Future sequence -> frame-wise latent
@@ -1608,9 +1610,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
     def shared_step(self, batch, **kwargs):
         
-        input_binary_maps, mask_binary_maps, _ = self.get_input(batch)
+        input_binary_maps, mask_binary_maps, input_occ_grid_map = self.get_input(batch)
         
-        cond, z = self.get_encoding(input_binary_maps, mask_binary_maps)
+        cond, z = self.get_encoding(input_binary_maps, mask_binary_maps, input_occ_grid_map)
 
         cond = cond.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (B*T, 32, 16, 16)
 
@@ -1705,7 +1707,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         log = dict()
 
-        x_in, x_gt, _ = self.get_input(batch)
+        x_in, x_gt, x_occ = self.get_input(batch)
 
         B_vis = 1                    # number of condition
         K = N                        # number of multimodal samples
@@ -1713,16 +1715,16 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         x_in = x_in[:B_vis]
         x_gt = x_gt[:B_vis]
-
+        x_occ = x_occ[:B_vis]
         t0 = time.perf_counter()
-        c, _ = self.get_encoding(x_in, x_gt)
+        c, _ = self.get_encoding(x_in, x_gt, x_occ)
 
         seq_len = self.first_stage_model.seq_len
 
         # 1) duplicate condition
         c = c.repeat_interleave(K, dim=0)             # (B_vis*K, C, H, W)
 
-        # 2) expand time axis
+        # 2) expand time axisss
         cond_exp = c.repeat_interleave(T, dim=0)      # (B_vis*K*T, C, H, W)
         
         # DDIM full sampling from random noise -> predicted future latent per frame
