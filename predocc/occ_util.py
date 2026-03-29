@@ -6,7 +6,7 @@ eps = 1e-4
 
 def reprojection(source_map, dx, dy, dtheta, x_lim, y_lim):
     B, C, H, W = source_map.shape
-    print("source_map shape:", source_map.shape)
+
     device, dtype = source_map.device, source_map.dtype
 
     dx = dx.expand(B)

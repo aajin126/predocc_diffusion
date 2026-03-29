@@ -5,7 +5,6 @@ model:
     monitor: "val/total_loss"
     embed_dim: 2
     seq_len: 10  
-    temporal_hidden_dim: 32
     lossconfig:
       target: modules.losses.AELoss
       params:

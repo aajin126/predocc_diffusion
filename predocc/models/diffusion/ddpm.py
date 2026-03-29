@@ -11,7 +11,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import time
-from matplotlib import pyplot as plt
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import LambdaLR
 from einops import rearrange, repeat
@@ -1449,7 +1451,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         self.convlstm_cell = ConvLSTMCell(
             input_dim=1,
-            hidden_dim=self.convlstm_hidden_dim,   # 32
+            hidden_dim=self.convlstm_hidden_dim - 1,   # 32
             kernel_size=(3, 3),
             bias=True,
         )
@@ -1489,6 +1491,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
             x_rel = maps["x_rel"]                                  # (B,T)
             y_rel = maps["y_rel"]                                  # (B,T)
             th_rel = maps["th_rel"]                                # (B,T)
+            input_occ_grid_map = input_occ_grid_map.reshape(-1, 1, IMG_SIZE, IMG_SIZE)
 
             
             out = [input_binary_maps, mask_binary_maps, input_occ_grid_map, x_rel, y_rel, th_rel]
@@ -1559,14 +1562,20 @@ class PredOccLatentDiffusion(LatentDiffusion):
         """
         b, seq_len, _, h, w = input_binary_maps.shape
         
-        # 1) Input sequence -> frame-wise latent
-        z_input = None
-        if input_binary_maps is not None:
-            with torch.no_grad():
-                encoder_posterior = self.first_stage_model.encode(input_binary_maps)
-                z_input = self.get_first_stage_encoding(encoder_posterior)  # (B*T, 2, 16, 16)
-        
-        
+        # 1) Conditioning: ConvLSTM on past sequence
+        h_enc, c_enc = self.convlstm_cell.init_hidden(batch_size=b, image_size=(h, w))
+        for t in range(seq_len):
+            h_enc, c_enc = self.convlstm_cell(
+                input_tensor=input_binary_maps[:, t],
+                cur_state=[h_enc, c_enc]
+            )
+        # h_enc : (B,32,64,64)
+
+        # h_enc + x_map conditioning
+        cond_in = torch.cat([h_enc, input_occ_grid_map], dim=1)   # (B,33,64,64)
+        cond_feat = self.cond_encoder(cond_in)
+        cond = self.cond_proj(cond_feat)           # (B, 32, 16, 16)
+
         # 2) Future sequence -> frame-wise latent
         z = None
         if mask_binary_maps is not None:
@@ -1575,7 +1584,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
                 encoder_posterior = self.first_stage_model.encode(mask_binary_maps)
                 z = self.get_first_stage_encoding(encoder_posterior)  # (B*T, embed_dim, 16, 16)
 
-        return z, z_input
+        out = [cond, z]
+        
+        return out
 
     @torch.no_grad()
     def decode_first_stage(self, z, predict_cids=False, force_not_quantize=False):
@@ -1599,9 +1610,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
     def shared_step(self, batch, **kwargs):
         
-        input_binary_maps, mask_binary_maps, _ = self.get_input(batch)
+        input_binary_maps, mask_binary_maps, input_occ_grid_map = self.get_input(batch)
         
-        z, z_input = self.get_encoding(input_binary_maps, mask_binary_maps)
+        cond, z = self.get_encoding(input_binary_maps, mask_binary_maps, input_occ_grid_map)
 
         loss = self(z, z_input) # forward
 
@@ -1686,7 +1697,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         return iou
 
     @torch.no_grad()
-    def log_images(self, batch, N=1, n_row=10, sample=True, ddim_steps=50, ddim_eta=1., return_keys=None,
+    def log_images(self, batch, N=1, n_row=10, sample=True, ddim_steps=10, ddim_eta=1., return_keys=None,
                    quantize_denoised=False, inpaint=False, plot_denoise_rows=False, plot_progressive_rows=False,
                    plot_diffusion_rows=False, **kwargs):
 
@@ -1694,7 +1705,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         log = dict()
 
-        x_in, x_gt, _ = self.get_input(batch)
+        x_in, x_gt, x_occ = self.get_input(batch)
 
         B_vis = 1                    # number of condition
         K = N                        # number of multimodal samples
@@ -1702,16 +1713,18 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         x_in = x_in[:B_vis]
         x_gt = x_gt[:B_vis]
-
+        x_occ = x_occ[:B_vis]
         t0 = time.perf_counter()
-        _, z_input = self.get_encoding(x_in, x_gt) # z_input: (B_vis*T, C, H, W)  
+        c, _ = self.get_encoding(x_in, x_gt, x_occ)
 
-        # Expand input latent for T frames
         seq_len = self.first_stage_model.seq_len
 
         # 1) duplicate condition
-        z_input_exp = z_input.repeat_interleave(K, dim=0)             # (B_vis*K*T, C, H, W)
+        c = c.repeat_interleave(K, dim=0)             # (B_vis*K, C, H, W)
 
+        # 2) expand time axisss
+        cond_exp = c.repeat_interleave(T, dim=0)      # (B_vis*K*T, C, H, W)
+        
         # DDIM full sampling from random noise -> predicted future latent per frame
         # batch_size=N*T will generate N*T independent samples
         if torch.cuda.is_available():
@@ -1722,12 +1735,12 @@ class PredOccLatentDiffusion(LatentDiffusion):
             # Input: z_input (N*T, 2, 16, 16), batch_size=N*T
             # Output: samples (N*T, 2, 16, 16) 
             samples, _ = self.sample_log(
-		        cond=z_input_exp,
-		        batch_size=z_input_exp.shape[0],
-		        ddim=True,
-		        ddim_steps=ddim_steps,
-		        eta=ddim_eta
-		    )
+                cond=cond_exp,
+                batch_size=cond_exp.shape[0],
+                ddim=True,
+                ddim_steps=ddim_steps,
+                eta=ddim_eta
+            )
 
         # samples shape: (N*T, 2, 16, 16) - each frame independently denoised
         # decode sampled latent to future sequence
@@ -1740,7 +1753,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         ddim_time = t1 - t0
         self.log("inference_time_sec", ddim_time, prog_bar=False, logger=True, on_step=True, on_epoch=False)
 
-        # frame-wise IoU
+        # frame-wise IoU: compare pred_seq and x_gt_vis frame by frame
         iou_list = []
         for ti in range(n_row):
             iou_t = self.compute_iou(pred_seq[0, ti], x_gt[0, ti], occ_thr=0.3)
@@ -1766,16 +1779,23 @@ class PredOccLatentDiffusion(LatentDiffusion):
         iou_text = "  ".join([f"t{ti+1}:{iou_list[ti]:.3f}" for ti in range(n_row)])
         ax.set_title(f"Frame-wise IoU | {iou_text}", fontsize=12)
 
+        plt.close(fig)
+
         log["GT | RECON | IoU"] = fig
 
         return log
-    
+
     def configure_optimizers(self):
         lr = self.learning_rate
 
-        # Unconditional mode (input latent concat)
-        print(f"{self.__class__.__name__}: Optimizing diffusion only (unconditional)")
-        params = list(self.model.parameters())
+        # LDM version check 
+        print(f"{self.__class__.__name__}: Optimizing diffusion only")
+        params = (
+            list(self.model.parameters()) +
+            list(self.convlstm_cell.parameters()) + 
+            list(self.cond_encoder.parameters()) + 
+            list(self.cond_proj.parameters())
+        )
 
 
         if self.learn_logvar:

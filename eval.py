@@ -40,7 +40,7 @@ MAP_Y_LIMIT = [-3.2, 3.2]   # Map limits on the y-axis
 RESOLUTION = 0.1        # Grid resolution in [m]'
 TRESHOLD_P_OCC = 0.8    # Occupancy threshold
 all_rows = []    
-csv_path = os.path.join("output", "LDM_v1.0", "eval_table.csv")
+csv_path = os.path.join("output", "v7.7.0", "eval_table.csv")
 
 def compute_iou(pred, gt, occ_thr=0.3):
     pred_occ = (pred > occ_thr)
@@ -122,21 +122,15 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
             if num_batches is not None and batch_idx >= num_batches:
                 break
             
-            print("batch_size:", batch["scan"].shape[0])
             # Get model inputs z, c, x_gt, xrec, xc
             x_in, x_gt, x_occ_map, x_rel, y_rel, th_rel = model.get_input(
                                                             batch,
                                                             process = 'test'
                                                         )
 
-            print(f"x_in shape: {x_in.shape}, x_gt shape: {x_gt.shape}")
-            
             t0 = time.perf_counter()
-            c, _ = model.get_encoding(x_in)
-
-            print(f"cond shape: {c.shape}, cond range: [{c.min():.4f}, {c.max():.4f}]")
-            print(f"x_in range: [{x_in.min():.4f}, {x_in.max():.4f}]")
-            print(f"x_gt range: [{x_gt.min():.4f}, {x_gt.max():.4f}]")
+            c, _ = model.get_encoding(x_in, x_gt)
+            c_exp = c.repeat_interleave(model.first_stage_model.seq_len, dim=0) # (B*T, 32, 16, 16)
 
             # Measure sampling time
             if device.type == "cuda":
@@ -146,8 +140,8 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
             # DDIM sampling from random noise
             with model.ema_scope("Evaluation"):
                 z_samples, _ = model.sample_log(
-                    cond=c,
-                    batch_size=num_samples,
+                    cond=c_exp,
+                    batch_size=num_samples * SEQ_LEN,
                     ddim=True,
                     ddim_steps=ddim_steps,
                     eta=ddim_eta
@@ -155,10 +149,7 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
             
             # Decode latent to sequence
             pred_seq = model.decode_first_stage(z_samples)  # (num_samples, T, 1, H, W)
-            
-            print(f"z_samples shape: {z_samples.shape}, range: [{z_samples.min():.4f}, {z_samples.max():.4f}]")
-            print(f"pred_seq shape: {pred_seq.shape}, range: [{pred_seq.min():.4f}, {pred_seq.max():.4f}]")
-            
+
             # Reprojection for each time step
             prediction_maps = torch.zeros(SEQ_LEN, 1, IMG_SIZE, IMG_SIZE).to(device)
 
