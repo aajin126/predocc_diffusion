@@ -1443,12 +1443,12 @@ class PredOccLatentDiffusion(LatentDiffusion):
         if self.first_stage_ckpt_path is not None:
             self.load_first_stage(self.first_stage_ckpt_path)
 
-        self.cond_encoder = Encoder(
-            in_channels=self.convlstm_hidden_dim,  # 32
-            num_hiddens=128,
-            num_residual_layers=2,
-            num_residual_hiddens=64,
-        )
+        # self.cond_encoder = Encoder(
+        #     in_channels=self.convlstm_hidden_dim,  # 32
+        #     num_hiddens=128,
+        #     num_residual_layers=2,
+        #     num_residual_hiddens=64,
+        # )
 
         self.cond_proj = nn.Conv2d(
             in_channels=128,
@@ -1544,7 +1544,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         # h_enc + x_map conditioning
         cond_in = torch.cat([h_enc, input_occ_grid_map], dim=1)   # (B,33,64,64)
-        cond_feat = self.cond_encoder(cond_in)  # (B,128,16,16)
+        cond_feat = self.first_stage_model._encoder(cond_in)  # (B,128,16,16)
         cond = self.cond_proj(cond_feat) # (B,32,16,16)
 
         z = None
@@ -1749,7 +1749,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         print(f"{self.__class__.__name__}: Optimizing diffusion only")
         params = (
             list(self.model.parameters()) +
-            list(self.cond_encoder.parameters()) +
+            #list(self.cond_encoder.parameters()) +
             list(self.cond_proj.parameters())   
         )
 
