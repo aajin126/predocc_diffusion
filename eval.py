@@ -40,7 +40,7 @@ MAP_Y_LIMIT = [-3.2, 3.2]   # Map limits on the y-axis
 RESOLUTION = 0.1        # Grid resolution in [m]'
 TRESHOLD_P_OCC = 0.8    # Occupancy threshold
 all_rows = []    
-csv_path = os.path.join("output", "v7.7.0", "eval_table.csv")
+csv_path = os.path.join("output", "v7.7.1", "eval_table.csv")
 
 def compute_iou(pred, gt, occ_thr=0.3):
     pred_occ = (pred > occ_thr)
@@ -129,7 +129,7 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
                                                         )
 
             t0 = time.perf_counter()
-            c, _ = model.get_encoding(x_in, x_gt)
+            c, _ = model.get_encoding(x_in, x_gt,x_occ_map)
             c_exp = c.repeat_interleave(model.first_stage_model.seq_len, dim=0) # (B*T, 32, 16, 16)
 
             # Measure sampling time
