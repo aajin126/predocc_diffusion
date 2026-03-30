@@ -578,28 +578,28 @@ class SequenceAutoencoderKL(pl.LightningModule):
         self.num_residual_hiddens = num_residual_hiddens
 
         self._encoder = Encoder(
-            in_channels=in_channels,  # 1 channel per frame
+            in_channels=seq_len * in_channels,  # 1 channel per frame
             num_hiddens=self.num_hiddens,
             num_residual_layers=self.num_residual_layers,
             num_residual_hiddens=self.num_residual_hiddens,
         )
 
         self._encoder_z_mu = nn.Conv2d(in_channels=num_hiddens, 
-                                    out_channels=embed_dim,
+                                    out_channels=seq_len *embed_dim,
                                     kernel_size=1, 
                                     stride=1)
         self._encoder_z_log_var = nn.Conv2d(in_channels=num_hiddens, 
-                                    out_channels=embed_dim,
+                                    out_channels=seq_len *embed_dim,
                                     kernel_size=1, 
                                     stride=1)  
 
-        self._decoder_z_mu = nn.ConvTranspose2d(in_channels=embed_dim, 
+        self._decoder_z_mu = nn.ConvTranspose2d(in_channels=embed_dim * seq_len, 
                                     out_channels=num_hiddens,
                                     kernel_size=1, 
                                     stride=1)
         
         self._decoder = Decoder(
-            out_channels= self.out_ch,
+            out_channels= seq_len * self.out_ch,
             num_hiddens=self.num_hiddens,
             num_residual_layers=self.num_residual_layers,
             num_residual_hiddens=self.num_residual_hiddens,
@@ -638,53 +638,53 @@ class SequenceAutoencoderKL(pl.LightningModule):
         returns: posterior over sequence of latents (B*T, embed_dim, 16, 16)
         
         Pipeline (frame-wise encoding):
-        - Reshape: (B, T, 1, 64, 64) → (B*T, 1, 64, 64)
-        - Encoder: (B*T, 1, 64, 64) → (B*T, 128, 16, 16)
-        - z_mu/z_log_var: (B*T, embed_dim, 16, 16)
+        - Reshape: (B, T, 1, 64, 64) → (B, T*1, 64, 64)
+        - Encoder: (B, T*1, 64, 64) → (B, 128, 16, 16)
+        - z_mu/z_log_var: (B, embed_dim, 16, 16)
         """
         b, t, c, h, w = x_seq.shape
         
         # Step 1: Reshape to flatten time dimension
-        x_flat = x_seq.reshape(b * t, c, h, w)  # (B*T, 1, 64, 64)
+        x_flat = x_seq.reshape(b, c* t, h, w)  # (B, T*C, 64, 64)
         
         # Step 2: Encoder
-        feat = self._encoder(x_flat)  # (B*T, 128, 16, 16)
+        feat = self._encoder(x_flat)  # (B, 128, 16, 16)
         
         # Step 3: z_mu, z_log_var (per-frame)
-        z_mu = self._encoder_z_mu(feat)       # (B*T, embed_dim, 16, 16)
-        z_log_var = self._encoder_z_log_var(feat)  # (B*T, embed_dim, 16, 16)
+        z_mu = self._encoder_z_mu(feat)      # (B, 128, 16, 16)
+        z_log_var = self._encoder_z_log_var(feat)  # (B, 128, 16, 16)
         
         # Step 4: Create moments for DiagonalGaussianDistribution
-        moments = torch.cat([z_mu, z_log_var], dim=1)  # (B*T, 2*embed_dim, 16, 16)
+        moments = torch.cat([z_mu, z_log_var], dim=1)  # (B, 2*T*embed_dim, 16, 16)
         posterior = DiagonalGaussianDistribution(moments)
         
         return posterior
 
     def decode(self, z):
         """
-        z: (B*T, embed_dim, 16, 16)
-        returns: (B, T, C, H, W) = (B, 10, 1, 64, 64)
+        z: (B, T*embed_dim, 16, 16)
+        returns: (B, T, C, H, W)
         
         Pipeline:
-        - decoder_z_mu: (B*T, 2, 16, 16) → (B*T, 128, 16, 16)
-        - Decoder: (B*T, 128, 16, 16) → (B*T, 1, 64, 64)
-        - Reshape: (B*T, 1, 64, 64) → (B, T, 1, 64, 64)
+        - decoder_z_mu: (B, T*embed_dim, 16, 16) -> (B, 128, 16, 16)
+        - Decoder:      (B, 128, 16, 16) -> (B, T*C, 64, 64)
+        - Reshape:      (B, T*C, 64, 64) -> (B, T, C, 64, 64)
         """
-        b_t = z.shape[0]
+        b = z.shape[0]
         
         # Step 1: decoder_z_mu
-        z = self._decoder_z_mu(z)  # (B*T, 128, 16, 16)
+        z = self._decoder_z_mu(z)    # (B, 128, 16, 16)
         
         # Step 2: Decoder
-        dec = self._decoder(z)  # (B*T, 1, 64, 64)
+        dec = self._decoder(z)       # (B, T*C, 64, 64)
         
         # Step 3: Reshape back to sequence
-        b = b_t // self.seq_len
-        t = self.seq_len
-        _, c_out, h_out, w_out = dec.shape
-        dec = dec.view(b, t, c_out, h_out, w_out)  # (B, T, 1, 64, 64)
-        
+        _, tc, h_out, w_out = dec.shape 
+        c_out = tc // self.seq_len
+        dec = dec.view(b, self.seq_len, c_out, h_out, w_out)   # (B, T, C, 64, 64)
+
         return dec
+            
 
     def forward(self, input_seq, x_map=None, sample_posterior=False):
         """
@@ -692,7 +692,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         x_map: (unused in this pipeline)
         """
         posterior = self.encode(input_seq)
-        z = posterior.sample() if sample_posterior else posterior.mode()  # (B*T, 2, 16, 16)
+        z = posterior.sample() if sample_posterior else posterior.mode()  # (B, T*embed_dim, 16, 16)
         dec = self.decode(z)
         return dec, posterior
 
@@ -846,9 +846,9 @@ class SequenceAutoencoderKL(pl.LightningModule):
     def log_images(self, batch, only_inputs=False, **kwargs):
         """
         Returns:
-            inputs:          (B*T, C, H, W) for easy grid logging
-            reconstructions: (B*T, C, H, W)
-            samples:         (B*T, C, H, W)
+            inputs:          (B, C*T, H, W) for easy grid logging
+            reconstructions: (B, C*T, H, W)
+            samples:         (B, C*T, H, W)
         """
         log = dict()
         x = self.get_input(batch, self.image_key)
