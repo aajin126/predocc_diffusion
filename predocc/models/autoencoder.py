@@ -734,11 +734,14 @@ class SequenceAutoencoderKL(pl.LightningModule):
         # Flatten time for the existing loss implementation
         b, t, c, h, w = inputs.shape
 
+        inputs_2d = inputs.view(b * t, c, h, w)
+        recon_2d = reconstructions.view(b * t, c, h, w)
+
         # 1) AE / generator update
         opt_ae.zero_grad()
         aeloss, log_dict_ae = self.loss(
-            inputs,
-            reconstructions,
+            inputs_2d,
+            recon_2d,
             posterior,
             split="train",
         )
@@ -757,9 +760,12 @@ class SequenceAutoencoderKL(pl.LightningModule):
 
         b, t, c, h, w = inputs.shape
 
+        inputs_2d = inputs.view(b * t, c, h, w)
+        recon_2d = reconstructions.view(b * t, c, h, w)
+
         aeloss, log_dict_ae = self.loss(
-            inputs,
-            reconstructions,
+            inputs_2d,
+            recon_2d,
             posterior,
             split="val"
         )
