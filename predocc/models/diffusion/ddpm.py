@@ -35,6 +35,7 @@ from models.diffusion.ddim import DDIMSampler
 from models.convlstm import ConvLSTMCell
 from models.autoencoder import Decoder
 from models.autoencoder import Encoder
+from predocc.modules.diffusionmodules.util import timestep_embedding
 
 __conditioning_keys__ = {'concat': 'c_concat',
                          'crossattn': 'c_crossattn',
@@ -1433,6 +1434,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         first_stage_config,
         cond_stage_config,
         first_stage_ckpt_path=None,
+        embedding_dim = 128,
         convlstm_hidden_dim = 32,
         *args,**kwargs,):
         super().__init__(
@@ -1443,6 +1445,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         )
 
         self.convlstm_hidden_dim = convlstm_hidden_dim
+        self.embedding_dim = embedding_dim
         self.first_stage_ckpt_path = first_stage_ckpt_path
         ignore_keys = kwargs.pop("ignore_keys", [])
 
@@ -1583,10 +1586,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
                 encoder_posterior = self.first_stage_model.encode(mask_binary_maps)
                 z = self.get_first_stage_encoding(encoder_posterior)  # (B, T*embed_dim, 16, 16)
         
-        _, c_lat , h_lat, w_lat = z.shape
-        z = z.view(b, seq_len, c_lat, h_lat, w_lat)
-        z = z.reshape(b, seq_len * c_lat, h_lat, w_lat)
-
         out = [cond, z]
         
         return out
@@ -1609,7 +1608,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
         c: (B, T*C_cond, H_lat, W_lat)
         """
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
-        return self.p_losses(x, c, t, *args, **kwargs)
+        t_emb = timestep_embedding(t, self.embedding_dim)  # (B, embedding_dim)
+        return self.p_losses(x, c, t_emb, *args, **kwargs)
 
     def shared_step(self, batch, **kwargs):
         
@@ -1617,13 +1617,16 @@ class PredOccLatentDiffusion(LatentDiffusion):
         
         cond, z = self.get_encoding(input_binary_maps, mask_binary_maps, input_occ_grid_map)
 
-        cond = cond.repeat_interleave(self.first_stage_model.seq_len, dim=1)  # (B, 32*T, 16, 16)
+        B, C, H, W = cond.shape
+        T = self.first_stage_model.seq_len
 
-        loss = self(z, cond) # forward
+        cond = cond.unsqueeze(2).repeat(1, 1, T, 1, 1).reshape(B, C*T, H, W) # (B, 32*T, 16, 16)
 
-        return loss
+        loss, loss_dict = self(z, cond) # forward
 
-		# same as ddpm
+        return loss, loss_dict
+
+	# same as ddpm
     def training_step(self, batch, batch_idx):
         loss, loss_dict = self.shared_step(batch)
 
@@ -1710,7 +1713,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         log = dict()
 
-        x_in, x_gt, _ = self.get_input(batch)
+        x_in, x_gt, x_occ = self.get_input(batch)
 
         B_vis = 1                    # number of condition
         K = N                        # number of multimodal samples
@@ -1718,9 +1721,10 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         x_in = x_in[:B_vis]
         x_gt = x_gt[:B_vis]
+        x_occ = x_occ[:B_vis]
 
         t0 = time.perf_counter()
-        c, _ = self.get_encoding(x_in, x_gt)
+        c, _ = self.get_encoding(x_in, x_gt, x_occ)
 
         seq_len = self.first_stage_model.seq_len
 
@@ -1749,8 +1753,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         # samples shape: (N, T*2, 16, 16) - each frame independently denoised
         # decode sampled latent to future sequence
-        samples = samples.view(N, T, -1, samples.shape[2], samples.shape[3])   # (B_vis*K, T, C_lat, 16, 16)
-        samples = samples.reshape(N*T, -1, samples.shape[2], samples.shape[3])  # (B_vis*K*T, C_lat, 16, 16)
         pred_seq = self.decode_first_stage(samples)   # (B_vis*K, T, 1, H, W)
 
         if torch.cuda.is_available():

@@ -18,113 +18,113 @@ from util import instantiate_from_config
 IMG_SIZE = 64
 SEQ_LEN = 10
 
-class Residual(nn.Module):
-    def __init__(self, in_channels, num_hiddens, num_residual_hiddens):
-        super(Residual, self).__init__()
-        self._block = nn.Sequential(
-            nn.ReLU(),
-            nn.Conv2d(in_channels=in_channels,
-                      out_channels=num_residual_hiddens,
-                      kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(num_residual_hiddens),
-            nn.ReLU(),
-            nn.Conv2d(in_channels=num_residual_hiddens,
-                      out_channels=num_hiddens,
-                      kernel_size=1, stride=1, bias=False),
-            nn.BatchNorm2d(num_hiddens)
-        )
+# class Residual(nn.Module):
+#     def __init__(self, in_channels, num_hiddens, num_residual_hiddens):
+#         super(Residual, self).__init__()
+#         self._block = nn.Sequential(
+#             nn.ReLU(),
+#             nn.Conv2d(in_channels=in_channels,
+#                       out_channels=num_residual_hiddens,
+#                       kernel_size=3, stride=1, padding=1, bias=False),
+#             nn.BatchNorm2d(num_residual_hiddens),
+#             nn.ReLU(),
+#             nn.Conv2d(in_channels=num_residual_hiddens,
+#                       out_channels=num_hiddens,
+#                       kernel_size=1, stride=1, bias=False),
+#             nn.BatchNorm2d(num_hiddens)
+#         )
     
-    def forward(self, x):
-        return x + self._block(x)
+#     def forward(self, x):
+#         return x + self._block(x)
 
-class ResidualStack(nn.Module):
-    def __init__(self, in_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
-        super(ResidualStack, self).__init__()
-        self._num_residual_layers = num_residual_layers
-        self._layers = nn.ModuleList([Residual(in_channels, num_hiddens, num_residual_hiddens)
-                             for _ in range(self._num_residual_layers)])
+# class ResidualStack(nn.Module):
+#     def __init__(self, in_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
+#         super(ResidualStack, self).__init__()
+#         self._num_residual_layers = num_residual_layers
+#         self._layers = nn.ModuleList([Residual(in_channels, num_hiddens, num_residual_hiddens)
+#                              for _ in range(self._num_residual_layers)])
 
-    def forward(self, x):
-        for i in range(self._num_residual_layers):
-            x = self._layers[i](x)
-        return F.relu(x)
+#     def forward(self, x):
+#         for i in range(self._num_residual_layers):
+#             x = self._layers[i](x)
+#         return F.relu(x)
 
-# Encoder & Decoder Architecture:
-# Encoder:
-class Encoder(nn.Module):
-    def __init__(self, in_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
-        super(Encoder, self).__init__()
-        self._conv_1 = nn.Sequential(*[
-                                        nn.Conv2d(in_channels=in_channels,
-                                                  out_channels=num_hiddens//2,
-                                                  kernel_size=4,
-                                                  stride=2, 
-                                                  padding=1),
-                                        nn.BatchNorm2d(num_hiddens//2),
-                                        nn.ReLU()
-                                    ])
-        self._conv_2 = nn.Sequential(*[
-                                        nn.Conv2d(in_channels=num_hiddens//2,
-                                                  out_channels=num_hiddens,
-                                                  kernel_size=4,
-                                                  stride=2, 
-                                                  padding=1),
-                                        nn.BatchNorm2d(num_hiddens)
-                                        #nn.ReLU()
-                                    ])
-        self._residual_stack = ResidualStack(in_channels=num_hiddens,
-                                             num_hiddens=num_hiddens,
-                                             num_residual_layers=num_residual_layers,
-                                             num_residual_hiddens=num_residual_hiddens)
+# # Encoder & Decoder Architecture:
+# # Encoder:
+# class Encoder(nn.Module):
+#     def __init__(self, in_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
+#         super(Encoder, self).__init__()
+#         self._conv_1 = nn.Sequential(*[
+#                                         nn.Conv2d(in_channels=in_channels,
+#                                                   out_channels=num_hiddens//2,
+#                                                   kernel_size=4,
+#                                                   stride=2, 
+#                                                   padding=1),
+#                                         nn.BatchNorm2d(num_hiddens//2),
+#                                         nn.ReLU()
+#                                     ])
+#         self._conv_2 = nn.Sequential(*[
+#                                         nn.Conv2d(in_channels=num_hiddens//2,
+#                                                   out_channels=num_hiddens,
+#                                                   kernel_size=4,
+#                                                   stride=2, 
+#                                                   padding=1),
+#                                         nn.BatchNorm2d(num_hiddens)
+#                                         #nn.ReLU()
+#                                     ])
+#         self._residual_stack = ResidualStack(in_channels=num_hiddens,
+#                                              num_hiddens=num_hiddens,
+#                                              num_residual_layers=num_residual_layers,
+#                                              num_residual_hiddens=num_residual_hiddens)
 
-    def forward(self, inputs):
-        x = self._conv_1(inputs)
-        x = self._conv_2(x)
-        x = self._residual_stack(x)
-        return x # predicted_map 
+#     def forward(self, inputs):
+#         x = self._conv_1(inputs)
+#         x = self._conv_2(x)
+#         x = self._residual_stack(x)
+#         return x # predicted_map 
 
-# Decoder:
-class Decoder(nn.Module):
-    def __init__(self, out_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
-        super(Decoder, self).__init__()
+# # Decoder:
+# class Decoder(nn.Module):
+#     def __init__(self, out_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
+#         super(Decoder, self).__init__()
         
-        self._residual_stack = ResidualStack(in_channels=num_hiddens,
-                                             num_hiddens=num_hiddens,
-                                             num_residual_layers=num_residual_layers,
-                                             num_residual_hiddens=num_residual_hiddens)
+#         self._residual_stack = ResidualStack(in_channels=num_hiddens,
+#                                              num_hiddens=num_hiddens,
+#                                              num_residual_layers=num_residual_layers,
+#                                              num_residual_hiddens=num_residual_hiddens)
 
-        self._conv_trans_2 = nn.Sequential(*[
-                                            nn.ReLU(),
-                                            nn.ConvTranspose2d(in_channels=num_hiddens,
-                                                              out_channels=num_hiddens//2,
-                                                              kernel_size=4,
-                                                              stride=2,
-                                                              padding=1),
-                                            nn.BatchNorm2d(num_hiddens//2),
-                                            nn.ReLU()
-                                        ])
+#         self._conv_trans_2 = nn.Sequential(*[
+#                                             nn.ReLU(),
+#                                             nn.ConvTranspose2d(in_channels=num_hiddens,
+#                                                               out_channels=num_hiddens//2,
+#                                                               kernel_size=4,
+#                                                               stride=2,
+#                                                               padding=1),
+#                                             nn.BatchNorm2d(num_hiddens//2),
+#                                             nn.ReLU()
+#                                         ])
 
-        self._conv_trans_1 = nn.Sequential(*[
-                                            nn.ConvTranspose2d(in_channels=num_hiddens//2,
-                                                              out_channels=num_hiddens//2,
-                                                              kernel_size=4,
-                                                              stride=2,
-                                                              padding=1),
-                                            nn.BatchNorm2d(num_hiddens//2),
-                                            nn.ReLU(),                  
-                                            nn.Conv2d(in_channels=num_hiddens//2,
-                                                      out_channels=out_channels,
-                                                      kernel_size=3,
-                                                      stride=1,
-                                                      padding=1),
-                                            nn.Sigmoid() # nn.Tanh()
-                                        ])
+#         self._conv_trans_1 = nn.Sequential(*[
+#                                             nn.ConvTranspose2d(in_channels=num_hiddens//2,
+#                                                               out_channels=num_hiddens//2,
+#                                                               kernel_size=4,
+#                                                               stride=2,
+#                                                               padding=1),
+#                                             nn.BatchNorm2d(num_hiddens//2),
+#                                             nn.ReLU(),                  
+#                                             nn.Conv2d(in_channels=num_hiddens//2,
+#                                                       out_channels=out_channels,
+#                                                       kernel_size=3,
+#                                                       stride=1,
+#                                                       padding=1),
+#                                             nn.Sigmoid() # nn.Tanh()
+#                                         ])
 
-    def forward(self, inputs):
-        x = self._residual_stack(inputs)
-        x = self._conv_trans_2(x)
-        x = self._conv_trans_1(x)
-        return x
+#     def forward(self, inputs):
+#         x = self._residual_stack(inputs)
+#         x = self._conv_trans_2(x)
+#         x = self._conv_trans_1(x)
+#         return x
 
 
 class VQModel(pl.LightningModule):
@@ -410,6 +410,7 @@ class AutoencoderKL(pl.LightningModule):
                  monitor=None,
                  ):
         super().__init__()
+        self.automatic_optimization = False
         self.image_key = image_key
         self.encoder = Encoder(**ddconfig)
         self.decoder = Decoder(**ddconfig)
@@ -448,7 +449,7 @@ class AutoencoderKL(pl.LightningModule):
         dec = self.decoder(z)
         return dec
 
-    def forward(self, input, sample_posterior=True):
+    def forward(self, input, sample_posterior=False):
         posterior = self.encode(input)
         if sample_posterior:
             z = posterior.sample()
@@ -457,33 +458,45 @@ class AutoencoderKL(pl.LightningModule):
         dec = self.decode(z)
         return dec, posterior
 
+    # def get_input(self, batch, k):
+    #     x = batch[k]
+    #     if len(x.shape) == 3:
+    #         x = x[..., None]
+    #     x = x.permute(0, 3, 1, 2).to(memory_format=torch.contiguous_format).float()
+    #     return x
+
     def get_input(self, batch, k):
-        x = batch[k]
-        if len(x.shape) == 3:
-            x = x[..., None]
-        x = x.permute(0, 3, 1, 2).to(memory_format=torch.contiguous_format).float()
+        maps = preprocess_batch(batch, device=self.device)
+        x = maps["mask_binary_maps"]  # (B, T, 1, H, W)
+        B, T, C, H, W = x.shape
+        x = x.reshape(B * T, C, H, W)
+        
         return x
 
-    def training_step(self, batch, batch_idx, optimizer_idx):
+    def training_step(self, batch, batch_idx):
+        opt_ae = self.optimizers()
         inputs = self.get_input(batch, self.image_key)
         reconstructions, posterior = self(inputs)
 
-        if optimizer_idx == 0:
-            # train encoder+decoder+logvar
-            aeloss, log_dict_ae = self.loss(inputs, reconstructions, posterior, optimizer_idx, self.global_step,
-                                            last_layer=self.get_last_layer(), split="train")
-            self.log("aeloss", aeloss, prog_bar=True, logger=True, on_step=True, on_epoch=True)
-            self.log_dict(log_dict_ae, prog_bar=False, logger=True, on_step=True, on_epoch=False)
-            return aeloss
+        # 1. Autoencoder(Generator) step
+        aeloss, log_dict_ae = self.loss(inputs, reconstructions, posterior, 0, self.global_step,
+                                        last_layer=self.get_last_layer(), split="train")
+        self.manual_backward(aeloss)
+        opt_ae.step()
+        opt_ae.zero_grad()
+        self.log("aeloss", aeloss, prog_bar=True, logger=True, on_step=True, on_epoch=True)
+        self.log_dict(log_dict_ae, prog_bar=True, logger=True, on_step=True, on_epoch=True)
 
-        if optimizer_idx == 1:
-            # train the discriminator
-            discloss, log_dict_disc = self.loss(inputs, reconstructions, posterior, optimizer_idx, self.global_step,
-                                                last_layer=self.get_last_layer(), split="train")
+        # 2. Discriminator step
+        # discloss, log_dict_disc = self.loss(inputs, reconstructions, posterior, 1, self.global_step,
+        #                                     last_layer=self.get_last_layer(), split="train")
+        # self.manual_backward(discloss)
+        # opt_disc.step()
+        # opt_disc.zero_grad()
+        # self.log("discloss", discloss)
+        # self.log_dict(log_dict_disc)
 
-            self.log("discloss", discloss, prog_bar=True, logger=True, on_step=True, on_epoch=True)
-            self.log_dict(log_dict_disc, prog_bar=False, logger=True, on_step=True, on_epoch=False)
-            return discloss
+        return aeloss
 
     def validation_step(self, batch, batch_idx):
         inputs = self.get_input(batch, self.image_key)
@@ -491,12 +504,11 @@ class AutoencoderKL(pl.LightningModule):
         aeloss, log_dict_ae = self.loss(inputs, reconstructions, posterior, 0, self.global_step,
                                         last_layer=self.get_last_layer(), split="val")
 
-        discloss, log_dict_disc = self.loss(inputs, reconstructions, posterior, 1, self.global_step,
-                                            last_layer=self.get_last_layer(), split="val")
+        # discloss, log_dict_disc = self.loss(inputs, reconstructions, posterior, 1, self.global_step,
+        #                                     last_layer=self.get_last_layer(), split="val")
 
-        self.log("val/rec_loss", log_dict_ae["val/rec_loss"])
-        self.log_dict(log_dict_ae)
-        self.log_dict(log_dict_disc)
+        self.log_dict(log_dict_ae, prog_bar=True, logger=True, on_step=True, on_epoch=True)
+        #self.log_dict(log_dict_disc)
         return self.log_dict
 
     def configure_optimizers(self):
@@ -506,28 +518,83 @@ class AutoencoderKL(pl.LightningModule):
                                   list(self.quant_conv.parameters())+
                                   list(self.post_quant_conv.parameters()),
                                   lr=lr, betas=(0.5, 0.9))
-        opt_disc = torch.optim.Adam(self.loss.discriminator.parameters(),
-                                    lr=lr, betas=(0.5, 0.9))
-        return [opt_ae, opt_disc], []
+        # opt_disc = torch.optim.Adam(self.loss.discriminator.parameters(),
+        #                             lr=lr, betas=(0.5, 0.9))
+        return [opt_ae], []
 
     def get_last_layer(self):
         return self.decoder.conv_out.weight
 
+    # @torch.no_grad()
+    # def log_images(self, batch, only_inputs=False, **kwargs):
+    #     log = dict()
+    #     x = self.get_input(batch, self.image_key)
+    #     x = x.to(self.device)
+    #     if not only_inputs:
+    #         xrec, posterior = self(x)
+    #         if x.shape[1] > 3:
+    #             # colorize with random projection
+    #             assert xrec.shape[1] > 3
+    #             x = self.to_rgb(x)
+    #             xrec = self.to_rgb(xrec)
+    #         log["samples"] = self.decode(torch.randn_like(posterior.sample()))
+    #         log["reconstructions"] = xrec
+    #     log["inputs"] = x
+    #     return log
+
+    @staticmethod
+    def compute_iou(pred, gt, occ_thr=0.3):
+        pred_occ = (pred > occ_thr)
+        gt_occ   = (gt > occ_thr)
+
+        inter = (pred_occ & gt_occ).sum().float()
+        union = (pred_occ | gt_occ).sum().float()
+
+        iou = inter / (union + 1e-6)
+
+        return iou
+
     @torch.no_grad()
     def log_images(self, batch, only_inputs=False, **kwargs):
+        """
+        Returns:
+            inputs:          (B*T, C, H, W)
+            reconstructions: (B*T, C, H, W)
+            samples:         (B*T, C, H, W)
+        """
         log = dict()
         x = self.get_input(batch, self.image_key)
-        x = x.to(self.device)
-        if not only_inputs:
-            xrec, posterior = self(x)
-            if x.shape[1] > 3:
-                # colorize with random projection
-                assert xrec.shape[1] > 3
-                x = self.to_rgb(x)
-                xrec = self.to_rgb(xrec)
-            log["samples"] = self.decode(torch.randn_like(posterior.sample()))
-            log["reconstructions"] = xrec
-        log["inputs"] = x
+        x = x.to(self.device)   # (B*T, C, H, W)
+        b, c, h, w = x.shape
+        xrec, posterior = self(x)                                   # (B*T,C,H,W)
+
+        # batch 0
+        gt_seq = x[:SEQ_LEN]         # (T,C,H,W)
+        rec_seq = xrec[:SEQ_LEN]     # (T,C,H,W)
+
+        # frame-wise IoU
+        iou_list = []
+        for ti in range(SEQ_LEN):
+            iou_t = self.compute_iou(rec_seq[ti], gt_seq[ti], occ_thr=0.3)
+            iou_list.append(iou_t.item())
+
+        panel = torch.cat([gt_seq, rec_seq], dim=0)       # (2T,C,H,W)
+        grid = make_grid(panel, nrow=10, normalize=False, value_range=(0, 1))
+
+        grid_np = grid.detach().cpu().permute(1, 2, 0).numpy()
+
+        if grid_np.shape[-1] == 1:
+            grid_np = grid_np[..., 0]
+
+        fig, ax = plt.subplots(figsize=(24, 8))
+        ax.imshow(grid_np, cmap="gray", vmin=0.0, vmax=1.0)
+        ax.axis("off")
+
+        iou_text = "  ".join([f"t{ti+1}:{iou_list[ti]:.3f}" for ti in range(SEQ_LEN)])
+        ax.set_title(f"Frame-wise IoU | {iou_text}", fontsize=12)
+
+        log["GT | RECON | IoU"] = fig
+
         return log
 
     def to_rgb(self, x):
