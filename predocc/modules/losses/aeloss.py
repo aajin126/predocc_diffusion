@@ -26,20 +26,19 @@ class AELoss(nn.Module):
 
     def forward(self, inputs, reconstructions, posteriors, optimizer_idx=None, global_step=None, split="train"):
         """
-        inputs, reconstructions: (B, T, C, H, W)
+        inputs, reconstructions: (B*T, C, H, W)
         posteriors: distribution object with .kl()
         """
 
         seq_len = 10
-        B = inputs.shape[0]
+        B = inputs.shape[0] // seq_len
 
         ce_loss = 0
 
         for k in range(seq_len):
-
             ce_loss = ce_loss +  torch.nn.functional.binary_cross_entropy(
-                reconstructions[:, k],
-                inputs[:, k],
+                reconstructions,
+                inputs,
                 reduction="sum"
             ).div(B)
 
