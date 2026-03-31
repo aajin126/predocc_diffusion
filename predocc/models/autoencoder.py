@@ -553,8 +553,8 @@ class SequenceAutoencoderKL(pl.LightningModule):
         lossconfig,
         embed_dim,
         seq_len=10,
-        in_channels=1,
-        out_ch=1,
+        in_channels=3,
+        out_ch=3,
         resolution=64,
         temporal_hidden_dim=32,
         num_hiddens=128,
@@ -578,7 +578,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         self.num_residual_hiddens = num_residual_hiddens
 
         self._encoder = Encoder(
-            in_channels=in_channels,  # 1 channel per frame
+            in_channels=in_channels,  # 3 channels per frame
             num_hiddens=self.num_hiddens,
             num_residual_layers=self.num_residual_layers,
             num_residual_hiddens=self.num_residual_hiddens,
@@ -630,11 +630,42 @@ class SequenceAutoencoderKL(pl.LightningModule):
             print("Unexpected keys:", unexpected)
 
     # ------------------------------------------------------------------
+    # Data handling
+    # ------------------------------------------------------------------
+    def get_input(self, batch, k):
+        """
+        Convert preprocessed maps to 3-channel video tensor: (B, 2T, 3, H, W).
+        First T frames: past (input), next T frames: future (target to predict).
+        """
+        maps = preprocess_batch(batch, device=self.device)
+
+        input_binary_maps  = maps["input_binary_maps"].float()   # (B, T, 1, H, W) - past
+        mask_binary_maps   = maps["mask_binary_maps"].float()    # (B, T, 1, H, W) - future
+        input_occ_grid_map = maps["input_occ_grid_map"].float()  # (B, H, W)
+        B, T, _, H, W = input_binary_maps.shape
+        static_map = input_occ_grid_map.unsqueeze(1).unsqueeze(2).expand(B, T, 1, H, W)  # (B, T, 1, H, W)
+
+        # Past frames (input)
+        dynamic_past = input_binary_maps * (1.0 - static_map)
+        free_past    = 1.0 - input_binary_maps
+        past_3ch     = torch.cat([dynamic_past, static_map, free_past], dim=2)   # (B, T, 3, H, W)
+
+        # Future frames (target)
+        dynamic_future = mask_binary_maps * (1.0 - static_map)
+        free_future    = 1.0 - mask_binary_maps
+        future_3ch     = torch.cat([dynamic_future, static_map, free_future], dim=2)  # (B, T, 3, H, W)
+
+        # Concatenate past and future along time dimension
+        x = torch.cat([past_3ch, future_3ch], dim=1)  # (B, 2T, 3, H, W)
+
+        return x
+
+    # ------------------------------------------------------------------
     # Core VAE
     # ------------------------------------------------------------------
     def encode(self, x_seq, x_map=None):
         """
-        x_seq: (B, T, C, H, W) = (B, 10, 1, 64, 64)
+        x_seq: (B, T, C, H, W) = (B, 20, 1, 64, 64)
         returns: posterior over sequence of latents (B*T, embed_dim, 16, 16)
         
         Pipeline (frame-wise encoding):
@@ -663,7 +694,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
     def decode(self, z):
         """
         z: (B*T, embed_dim, 16, 16)
-        returns: (B, T, C, H, W) = (B, 10, 1, 64, 64)
+        returns: (B, T, C, H, W) = (B, 20, 1, 64, 64)
         
         Pipeline:
         - decoder_z_mu: (B*T, 2, 16, 16) → (B*T, 128, 16, 16)
@@ -676,13 +707,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         z = self._decoder_z_mu(z)  # (B*T, 128, 16, 16)
         
         # Step 2: Decoder
-        dec = self._decoder(z)  # (B*T, 1, 64, 64)
-        
-        # Step 3: Reshape back to sequence
-        b = b_t // self.seq_len
-        t = self.seq_len
-        _, c_out, h_out, w_out = dec.shape
-        dec = dec.view(b, t, c_out, h_out, w_out)  # (B, T, 1, 64, 64)
+        dec = self._decoder(z)  # (B*T, 3, 64, 64)
         
         return dec
 
@@ -697,26 +722,12 @@ class SequenceAutoencoderKL(pl.LightningModule):
         return dec, posterior
 
     # ------------------------------------------------------------------
-    # Data handling
-    # ------------------------------------------------------------------
-    def get_input(self, batch, k):
-        """
-        For PredOccDataset, use mask_binary_maps as the AE target sequence.
-        Returns: (B, T, C, H, W)
-        """
-        maps = preprocess_batch(batch, device=self.device)
-        x = maps["mask_binary_maps"]  # (B, T, 1, H, W)
-        x = x.reshape(-1, SEQ_LEN, 1, IMG_SIZE, IMG_SIZE)
-        
-        return x
-
-    # ------------------------------------------------------------------
     # Training / validation
     # Manual optimization for modern Lightning multi-optimizer support
     # ------------------------------------------------------------------
     def training_step(self, batch, batch_idx):
-        inputs = self.get_input(batch, self.image_key)              # (B,T,C,H,W)
-        reconstructions, posterior = self(inputs)          # recon: (B,T,C,H,W)
+        inputs = self.get_input(batch, self.image_key)              # (B,2T,C,H,W)
+        reconstructions, posterior = self(inputs)          # recon: (B,2T,C,H,W)
 
         opt_ae = self.optimizers()
 
