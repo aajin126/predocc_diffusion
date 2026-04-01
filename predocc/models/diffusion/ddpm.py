@@ -35,7 +35,6 @@ from models.diffusion.ddim import DDIMSampler
 from models.convlstm import ConvLSTMCell
 from models.autoencoder import Decoder
 from models.autoencoder import Encoder
-from predocc.modules.diffusionmodules.util import timestep_embedding
 
 __conditioning_keys__ = {'concat': 'c_concat',
                          'crossattn': 'c_crossattn',
@@ -1432,7 +1431,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
         cond_stage_config,
         first_stage_ckpt_path=None,
         convlstm_hidden_dim = 32,
-        embedding_dim
         *args,**kwargs,):
         super().__init__(
             first_stage_config=first_stage_config,
@@ -1604,8 +1602,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         c: (B *T, C_cond, H_lat, W_lat)
         """
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
-        t_emb = timestep_embedding(t, self.embedding_dim)  # (B, embedding_dim)
-        return self.p_losses(x, c, t_emb, *args, **kwargs)
+        return self.p_losses(x, c, t, *args, **kwargs)
 
     def shared_step(self, batch, **kwargs):
         
