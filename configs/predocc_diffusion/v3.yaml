@@ -12,7 +12,7 @@ model:
     parameterization: eps
     monitor: val/loss
     use_ema: True
-    convlstm_hidden_dim: 32
+    convlstm_hidden_dim: 33
     scale_factor: 0.374106
 
     first_stage_ckpt_path: "./pretrained_models/first_stage_models/AE/v7.0/model.ckpt"
@@ -48,10 +48,10 @@ model:
 
 
     unet_config:
-      target: modules.diffusionmodules.openaimodel.UNetModel
+      target: modules.diffusionmodules.unet_latent_shift.UNetModel
       params:
         image_size: 16
-        in_channels: 34  # 34 : x_noisy(2) + cond(32) # 4 : x_noisy(2) + cond(2)
+        in_channels: 35  # 34 : x_noisy(2) + cond(32) # 4 : x_noisy(2) + cond(2)
         out_channels: 2
         model_channels: 128
         attention_resolutions: [4]
