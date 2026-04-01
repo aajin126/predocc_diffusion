@@ -1716,6 +1716,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         x_in = x_in[:B_vis]
         x_gt = x_gt[:B_vis]
+        x_occ = x_occ[:B_vis]
 
         t0 = time.perf_counter()
         c, _ = self.get_encoding(x_in, x_gt, x_occ)
