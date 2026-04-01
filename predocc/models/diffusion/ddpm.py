@@ -428,10 +428,7 @@ class DDPM(pl.LightningModule):
     def configure_optimizers(self):
         lr = self.learning_rate
         params = (
-                list(self.model.parameters())+
-                list(self.convlstm_cell.parameters()) +
-                list(self.cond_encoder.parameters()) +
-                list(self.cond_proj.parameters()))
+                list(self.model.parameters()))
         
         if self.learn_logvar:
             params = params + [self.logvar]
@@ -1435,6 +1432,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         cond_stage_config,
         first_stage_ckpt_path=None,
         convlstm_hidden_dim = 32,
+        embedding_dim
         *args,**kwargs,):
         super().__init__(
             first_stage_config=first_stage_config,
@@ -1452,7 +1450,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         self.convlstm_cell = ConvLSTMCell(
             input_dim=1,
-            hidden_dim=self.convlstm_hidden_dim,   # 32
+            hidden_dim=self.convlstm_hidden_dim-1,   # 32
             kernel_size=(3, 3),
             bias=True,
         )
@@ -1563,9 +1561,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
         b, seq_len, c , h, w = input_binary_maps.shape
         
         # 1) Conditioning: ConvLSTM on past sequence
-        h_enc, c_enc = self.first_stage_model.temporal_encoder.init_hidden(batch_size=b, image_size=(h, w))
+        h_enc, c_enc = self.convlstm_cell.init_hidden(batch_size=b, image_size=(h, w))
         for t in range(seq_len):
-            h_enc, c_enc = self.first_stage_model.temporal_encoder(
+            h_enc, c_enc = self.convlstm_cell(
                 input_tensor=input_binary_maps[:, t],
                 cur_state=[h_enc, c_enc]
             )
@@ -1794,6 +1792,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         print(f"{self.__class__.__name__}: Optimizing diffusion only")
         params = (
             list(self.model.parameters()) +
+            list(self.convlstm_cell.parameters()) +
             list(self.cond_encoder.parameters()) + 
             list(self.cond_proj.parameters())
         )
