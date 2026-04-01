@@ -15,7 +15,7 @@ P_free = 0.3       # Probability that cell is free with total confidence
 MAP_X_LIMIT = [0.0, 6.4]
 MAP_Y_LIMIT = [-3.2, 3.2]
 RESOLUTION = 0.1
-TRESHOLD_P_OCC = 0.8
+TRESHOLD_P_OCC = 0.95
 
 
 def preprocess_batch(batch, device=None):

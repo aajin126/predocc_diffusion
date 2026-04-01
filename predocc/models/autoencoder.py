@@ -871,16 +871,15 @@ class SequenceAutoencoderKL(pl.LightningModule):
         log = dict()
         x = self.get_input(batch, self.image_key)
         x = x.to(self.device)   # (B*T, C, H, W)
-        b_t, c, h, w = x.shape
-        xrec, posterior = self(x)                          # (B*T,C,H,W)
+        xrec, posterior = self(x)                                   # (B*T,C,H,W)
 
         # batch 0
-        gt_seq = x[:self.model.seq_len]         # (T,C,H,W)
-        rec_seq = xrec[:self.model.seq_len]     # (T,C,H,W)
+        gt_seq = x[0]         # (T,C,H,W)
+        rec_seq = xrec[:self.seq_len]     # (T,C,H,W)
 
         # frame-wise IoU
         iou_list = []
-        for ti in range(self.model.seq_len):
+        for ti in range(self.seq_len):
             iou_t = self.compute_iou(rec_seq[ti], gt_seq[ti], occ_thr=0.3)
             iou_list.append(iou_t.item())
 
@@ -896,7 +895,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         ax.imshow(grid_np, cmap="gray", vmin=0.0, vmax=1.0)
         ax.axis("off")
 
-        iou_text = "  ".join([f"t{ti+1}:{iou_list[ti]:.3f}" for ti in range(self.model.seq_len)])
+        iou_text = "  ".join([f"t{ti+1}:{iou_list[ti]:.3f}" for ti in range(self.seq_len)])
         ax.set_title(f"Frame-wise IoU | {iou_text}", fontsize=12)
 
         log["GT | RECON | IoU"] = fig
