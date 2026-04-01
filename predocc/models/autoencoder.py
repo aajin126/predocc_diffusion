@@ -867,11 +867,12 @@ class SequenceAutoencoderKL(pl.LightningModule):
             reconstructions: (B*T, C, H, W)
             samples:         (B*T, C, H, W)
         """
+
         log = dict()
         x = self.get_input(batch, self.image_key)
         x = x.to(self.device)   # (B*T, C, H, W)
         b_t, c, h, w = x.shape
-        xrec, posterior = self(x)                                   # (B*T,C,H,W)
+        xrec, posterior = self(x)                          # (B*T,C,H,W)
 
         # batch 0
         gt_seq = x[:self.model.seq_len]         # (T,C,H,W)
