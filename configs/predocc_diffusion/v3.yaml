@@ -9,7 +9,7 @@ model:
     image_size: 16
     channels: 2
     conditioning_key: concat
-    parameterization: eps
+    parameterization: x0
     monitor: val/loss
     use_ema: True
     convlstm_hidden_dim: 33 #32
@@ -87,9 +87,9 @@ lightning:
   trainer:
     max_epochs: 100
     check_val_every_n_epoch: 1
-    accelerator: gpu
-    devices: 4
-    strategy: ddp_find_unused_parameters_true
+    # accelerator: gpu
+    # devices: 4
+    # strategy: ddp_find_unused_parameters_true
 
   callbacks:
     image_logger:
@@ -102,9 +102,9 @@ lightning:
       params:
         filename: "trainloss-{epoch:06d}"
         monitor: "train/loss_epoch"
-        save_top_k: 5
+        save_top_k: -1
+        every_n_epochs: 10
         save_last: false
-
 
   modelcheckpoint:
     params:
