@@ -1432,8 +1432,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
         cond_stage_config,
         first_stage_ckpt_path=None,
         convlstm_hidden_dim = 32,
-        latent_reg_weight=0.0,
-        latent_reg_loss_type="l1",
         *args,**kwargs,):
         super().__init__(
             first_stage_config=first_stage_config,
@@ -1444,8 +1442,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         self.convlstm_hidden_dim = convlstm_hidden_dim
         self.first_stage_ckpt_path = first_stage_ckpt_path
-        self.latent_reg_weight = latent_reg_weight
-        self.latent_reg_loss_type = latent_reg_loss_type
         ignore_keys = kwargs.pop("ignore_keys", [])
 
         if self.first_stage_ckpt_path is not None:
@@ -1655,10 +1651,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         if self.parameterization == "x0":
             target = x_start
-            pred_x0 = model_output
         elif self.parameterization == "eps":
             target = noise
-            pred_x0 = self.predict_start_from_noise(x_noisy, t=t, noise=model_output)
         else:
             raise NotImplementedError()
 
@@ -1677,18 +1671,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
         loss_vlb = self.get_loss(model_output, target, mean=False).mean(dim=(1, 2, 3))
         loss_vlb = (self.lvlb_weights[t] * loss_vlb).mean()
         loss_dict.update({f'{prefix}/loss_vlb': loss_vlb})
-
-        if self.latent_reg_weight > 0.0:
-            if self.latent_reg_loss_type == "l1":
-                latent_reg_loss = torch.abs(pred_x0 - x_start)
-            elif self.latent_reg_loss_type == "l2":
-                latent_reg_loss = torch.nn.functional.mse_loss(pred_x0, x_start, reduction="none")
-            else:
-                raise NotImplementedError(f"unknown latent regression loss type '{self.latent_reg_loss_type}'")
-
-            latent_reg_loss = latent_reg_loss.mean(dim=(1, 2, 3)).mean()
-            loss_dict.update({f"{prefix}/loss_latent_reg": latent_reg_loss})
-            loss += self.latent_reg_weight * latent_reg_loss
 
         loss += (self.original_elbo_weight * loss_vlb)
         loss_dict.update({f'{prefix}/loss': loss})
