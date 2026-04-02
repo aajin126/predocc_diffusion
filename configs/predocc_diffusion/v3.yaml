@@ -9,11 +9,13 @@ model:
     image_size: 16
     channels: 2
     conditioning_key: concat
-    parameterization: x0
+    parameterization: eps
     monitor: val/loss
     use_ema: True
     convlstm_hidden_dim: 33 #32
     scale_factor: 0.384393
+    latent_reg_weight: 0.0
+    latent_reg_loss_type: l1
 
     first_stage_ckpt_path: "./pretrained_models/first_stage_models/AE/v6.0/model.ckpt"
 
