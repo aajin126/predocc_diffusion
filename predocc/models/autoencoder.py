@@ -18,113 +18,113 @@ from util import instantiate_from_config
 IMG_SIZE = 64
 SEQ_LEN = 10
 
-# class Residual(nn.Module):
-#     def __init__(self, in_channels, num_hiddens, num_residual_hiddens):
-#         super(Residual, self).__init__()
-#         self._block = nn.Sequential(
-#             nn.ReLU(),
-#             nn.Conv2d(in_channels=in_channels,
-#                       out_channels=num_residual_hiddens,
-#                       kernel_size=3, stride=1, padding=1, bias=False),
-#             nn.BatchNorm2d(num_residual_hiddens),
-#             nn.ReLU(),
-#             nn.Conv2d(in_channels=num_residual_hiddens,
-#                       out_channels=num_hiddens,
-#                       kernel_size=1, stride=1, bias=False),
-#             nn.BatchNorm2d(num_hiddens)
-#         )
+class Residual(nn.Module):
+    def __init__(self, in_channels, num_hiddens, num_residual_hiddens):
+        super(Residual, self).__init__()
+        self._block = nn.Sequential(
+            nn.ReLU(),
+            nn.Conv2d(in_channels=in_channels,
+                      out_channels=num_residual_hiddens,
+                      kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(num_residual_hiddens),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=num_residual_hiddens,
+                      out_channels=num_hiddens,
+                      kernel_size=1, stride=1, bias=False),
+            nn.BatchNorm2d(num_hiddens)
+        )
     
-#     def forward(self, x):
-#         return x + self._block(x)
+    def forward(self, x):
+        return x + self._block(x)
 
-# class ResidualStack(nn.Module):
-#     def __init__(self, in_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
-#         super(ResidualStack, self).__init__()
-#         self._num_residual_layers = num_residual_layers
-#         self._layers = nn.ModuleList([Residual(in_channels, num_hiddens, num_residual_hiddens)
-#                              for _ in range(self._num_residual_layers)])
+class ResidualStack(nn.Module):
+    def __init__(self, in_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
+        super(ResidualStack, self).__init__()
+        self._num_residual_layers = num_residual_layers
+        self._layers = nn.ModuleList([Residual(in_channels, num_hiddens, num_residual_hiddens)
+                             for _ in range(self._num_residual_layers)])
 
-#     def forward(self, x):
-#         for i in range(self._num_residual_layers):
-#             x = self._layers[i](x)
-#         return F.relu(x)
+    def forward(self, x):
+        for i in range(self._num_residual_layers):
+            x = self._layers[i](x)
+        return F.relu(x)
 
-# # Encoder & Decoder Architecture:
-# # Encoder:
-# class Encoder(nn.Module):
-#     def __init__(self, in_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
-#         super(Encoder, self).__init__()
-#         self._conv_1 = nn.Sequential(*[
-#                                         nn.Conv2d(in_channels=in_channels,
-#                                                   out_channels=num_hiddens//2,
-#                                                   kernel_size=4,
-#                                                   stride=2, 
-#                                                   padding=1),
-#                                         nn.BatchNorm2d(num_hiddens//2),
-#                                         nn.ReLU()
-#                                     ])
-#         self._conv_2 = nn.Sequential(*[
-#                                         nn.Conv2d(in_channels=num_hiddens//2,
-#                                                   out_channels=num_hiddens,
-#                                                   kernel_size=4,
-#                                                   stride=2, 
-#                                                   padding=1),
-#                                         nn.BatchNorm2d(num_hiddens)
-#                                         #nn.ReLU()
-#                                     ])
-#         self._residual_stack = ResidualStack(in_channels=num_hiddens,
-#                                              num_hiddens=num_hiddens,
-#                                              num_residual_layers=num_residual_layers,
-#                                              num_residual_hiddens=num_residual_hiddens)
+# Encoder & Decoder Architecture:
+# Encoder:
+class Encoder(nn.Module):
+    def __init__(self, in_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
+        super(Encoder, self).__init__()
+        self._conv_1 = nn.Sequential(*[
+                                        nn.Conv2d(in_channels=in_channels,
+                                                  out_channels=num_hiddens//2,
+                                                  kernel_size=4,
+                                                  stride=2, 
+                                                  padding=1),
+                                        nn.BatchNorm2d(num_hiddens//2),
+                                        nn.ReLU()
+                                    ])
+        self._conv_2 = nn.Sequential(*[
+                                        nn.Conv2d(in_channels=num_hiddens//2,
+                                                  out_channels=num_hiddens,
+                                                  kernel_size=4,
+                                                  stride=2, 
+                                                  padding=1),
+                                        nn.BatchNorm2d(num_hiddens)
+                                        #nn.ReLU()
+                                    ])
+        self._residual_stack = ResidualStack(in_channels=num_hiddens,
+                                             num_hiddens=num_hiddens,
+                                             num_residual_layers=num_residual_layers,
+                                             num_residual_hiddens=num_residual_hiddens)
 
-#     def forward(self, inputs):
-#         x = self._conv_1(inputs)
-#         x = self._conv_2(x)
-#         x = self._residual_stack(x)
-#         return x # predicted_map 
+    def forward(self, inputs):
+        x = self._conv_1(inputs)
+        x = self._conv_2(x)
+        x = self._residual_stack(x)
+        return x # predicted_map 
 
-# # Decoder:
-# class Decoder(nn.Module):
-#     def __init__(self, out_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
-#         super(Decoder, self).__init__()
+# Decoder:
+class Decoder(nn.Module):
+    def __init__(self, out_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
+        super(Decoder, self).__init__()
         
-#         self._residual_stack = ResidualStack(in_channels=num_hiddens,
-#                                              num_hiddens=num_hiddens,
-#                                              num_residual_layers=num_residual_layers,
-#                                              num_residual_hiddens=num_residual_hiddens)
+        self._residual_stack = ResidualStack(in_channels=num_hiddens,
+                                             num_hiddens=num_hiddens,
+                                             num_residual_layers=num_residual_layers,
+                                             num_residual_hiddens=num_residual_hiddens)
 
-#         self._conv_trans_2 = nn.Sequential(*[
-#                                             nn.ReLU(),
-#                                             nn.ConvTranspose2d(in_channels=num_hiddens,
-#                                                               out_channels=num_hiddens//2,
-#                                                               kernel_size=4,
-#                                                               stride=2,
-#                                                               padding=1),
-#                                             nn.BatchNorm2d(num_hiddens//2),
-#                                             nn.ReLU()
-#                                         ])
+        self._conv_trans_2 = nn.Sequential(*[
+                                            nn.ReLU(),
+                                            nn.ConvTranspose2d(in_channels=num_hiddens,
+                                                              out_channels=num_hiddens//2,
+                                                              kernel_size=4,
+                                                              stride=2,
+                                                              padding=1),
+                                            nn.BatchNorm2d(num_hiddens//2),
+                                            nn.ReLU()
+                                        ])
 
-#         self._conv_trans_1 = nn.Sequential(*[
-#                                             nn.ConvTranspose2d(in_channels=num_hiddens//2,
-#                                                               out_channels=num_hiddens//2,
-#                                                               kernel_size=4,
-#                                                               stride=2,
-#                                                               padding=1),
-#                                             nn.BatchNorm2d(num_hiddens//2),
-#                                             nn.ReLU(),                  
-#                                             nn.Conv2d(in_channels=num_hiddens//2,
-#                                                       out_channels=out_channels,
-#                                                       kernel_size=3,
-#                                                       stride=1,
-#                                                       padding=1),
-#                                             nn.Sigmoid() # nn.Tanh()
-#                                         ])
+        self._conv_trans_1 = nn.Sequential(*[
+                                            nn.ConvTranspose2d(in_channels=num_hiddens//2,
+                                                              out_channels=num_hiddens//2,
+                                                              kernel_size=4,
+                                                              stride=2,
+                                                              padding=1),
+                                            nn.BatchNorm2d(num_hiddens//2),
+                                            nn.ReLU(),                  
+                                            nn.Conv2d(in_channels=num_hiddens//2,
+                                                      out_channels=out_channels,
+                                                      kernel_size=3,
+                                                      stride=1,
+                                                      padding=1),
+                                            nn.Sigmoid() # nn.Tanh()
+                                        ])
 
-#     def forward(self, inputs):
-#         x = self._residual_stack(inputs)
-#         x = self._conv_trans_2(x)
-#         x = self._conv_trans_1(x)
-#         return x
+    def forward(self, inputs):
+        x = self._residual_stack(inputs)
+        x = self._conv_trans_2(x)
+        x = self._conv_trans_1(x)
+        return x
 
 
 class VQModel(pl.LightningModule):
@@ -624,6 +624,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         out_ch=1,
         resolution=64,
         temporal_hidden_dim=32,
+        map_channels=1,
         num_hiddens=128,
         num_residual_layers=2,
         num_residual_hiddens=64,
@@ -637,6 +638,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         self.embed_dim = embed_dim
         self.seq_len = seq_len
         self.temporal_hidden_dim = temporal_hidden_dim
+        self.map_channels = map_channels
         self.in_channels = in_channels
         self.out_ch = out_ch
         self.resolution = resolution
@@ -644,34 +646,43 @@ class SequenceAutoencoderKL(pl.LightningModule):
         self.num_residual_layers = num_residual_layers
         self.num_residual_hiddens = num_residual_hiddens
 
+        # ---------- Temporal encoder ----------
+        self.temporal_encoder = ConvLSTMCell(
+            input_dim=in_channels,
+            hidden_dim=temporal_hidden_dim,
+            kernel_size=(3, 3),
+            bias=True,
+        )
+
         self._encoder = Encoder(
-            in_channels=seq_len * in_channels,  # 1 channel per frame
+            in_channels=temporal_hidden_dim + map_channels,
             num_hiddens=self.num_hiddens,
             num_residual_layers=self.num_residual_layers,
             num_residual_hiddens=self.num_residual_hiddens,
         )
 
         self._encoder_z_mu = nn.Conv2d(in_channels=num_hiddens, 
-                                    out_channels=seq_len *embed_dim,
+                                    out_channels=embed_dim,
                                     kernel_size=1, 
                                     stride=1)
         self._encoder_z_log_var = nn.Conv2d(in_channels=num_hiddens, 
-                                    out_channels=seq_len *embed_dim,
+                                    out_channels=embed_dim,
                                     kernel_size=1, 
                                     stride=1)  
 
-        self._decoder_z_mu = nn.ConvTranspose2d(in_channels=embed_dim * seq_len, 
+        self._decoder_z_mu = nn.ConvTranspose2d(in_channels=embed_dim, 
                                     out_channels=num_hiddens,
                                     kernel_size=1, 
                                     stride=1)
         
         self._decoder = Decoder(
-            out_channels= seq_len * self.out_ch,
+            out_channels= self.out_ch,
             num_hiddens=self.num_hiddens,
             num_residual_layers=self.num_residual_layers,
             num_residual_hiddens=self.num_residual_hiddens,
         )
 
+        
         self.loss = instantiate_from_config(lossconfig)
 
         if monitor is not None:
@@ -702,64 +713,86 @@ class SequenceAutoencoderKL(pl.LightningModule):
     def encode(self, x_seq, x_map=None):
         """
         x_seq: (B, T, C, H, W) = (B, 10, 1, 64, 64)
-        returns: posterior over sequence of latents (B*T, embed_dim, 16, 16)
+        returns: posterior over sequence of latents (B*T, 2, 16, 16)
         
-        Pipeline (frame-wise encoding):
-        - Reshape: (B, T, 1, 64, 64) → (B, T*1, 64, 64)
-        - Encoder: (B, T*1, 64, 64) → (B, 128, 16, 16)
-        - z_mu/z_log_var: (B, embed_dim, 16, 16)
+        Pipeline:
+        - ConvLSTM: (B, 10, 1, 64, 64) → h_seq (B, 10, 32, 64, 64)
+        - Reshape: (B, 10, 32, 64, 64) → (B*10, 32, 64, 64)
+        - Encoder: (B*10, 32, 64, 64) → (B*10, 128, 16, 16)
+        - z_mu/z_log_var: (B*10, 2, 16, 16)
         """
         b, t, c, h, w = x_seq.shape
         
-        # Step 1: Reshape to flatten time dimension
-        x_flat = x_seq.reshape(b, c* t, h, w)  # (B, T*C, 64, 64)
+        # Step 1: ConvLSTM forward - generate h_seq (B, 10, 32, 64, 64)
+        h_enc, enc_state = self.temporal_encoder.init_hidden(batch_size=b, image_size=(h, w))
+        h_seq = []
         
-        # Step 2: Encoder
-        feat = self._encoder(x_flat)  # (B, 128, 16, 16)
+        for i in range(t):
+            h_enc, enc_state = self.temporal_encoder(
+                input_tensor=x_seq[:, i],
+                cur_state=[h_enc, enc_state],
+            )
+            h_seq.append(h_enc.unsqueeze(1))
         
-        # Step 3: z_mu, z_log_var (per-frame)
-        z_mu = self._encoder_z_mu(feat)      # (B, 128, 16, 16)
-        z_log_var = self._encoder_z_log_var(feat)  # (B, 128, 16, 16)
+        # h_seq = [(B, 1, 32, 64, 64), (B, 1, 32, 64, 64), ..., (B, 1, 32, 64, 64)]
         
-        # Step 4: Create moments for DiagonalGaussianDistribution
-        moments = torch.cat([z_mu, z_log_var], dim=1)  # (B, 2*T*embed_dim, 16, 16)
+        h_seq = torch.cat(h_seq, dim=1)  # (B, T, 32, 64, 64)
+
+        # Step 2: Expand x_map to time axis
+        x_map_expanded = x_map.unsqueeze(1).repeat(1, t, 1, 1, 1)  # (B, 1, 64, 64) → (B, T, 1, 64, 64)
+
+        enc_in = torch.cat([h_seq, x_map_expanded], dim=2)  # (B, T, 33, 64, 64)
+        
+        # Step 3: Reshape (B, T, 33, 64, 64) → (B*T, 33, 64, 64)
+        h_flat = enc_in.reshape(b * t, self.temporal_hidden_dim + self.map_channels, h, w)
+        
+        # Step 4: Encoder (B*T, 33, 64, 64) → (B*T, 128, 16, 16)
+        feat = self._encoder(h_flat)
+        
+        # Step 5: z_mu, z_log_var (per-timestep)
+        z_mu = self._encoder_z_mu(feat)       # (B*T, 2, 16, 16)
+        z_log_var = self._encoder_z_log_var(feat)  # (B*T, 2, 16, 16)
+        
+        # Step 6: Create moments for DiagonalGaussianDistribution
+        moments = torch.cat([z_mu, z_log_var], dim=1)  # (B*T, 4, 16, 16)
         posterior = DiagonalGaussianDistribution(moments)
         
         return posterior
 
+
     def decode(self, z):
         """
-        z: (B, T*embed_dim, 16, 16)
-        returns: (B, T, C, H, W)
+        z: (B*T, embed_dim, 16, 16)
+        returns: (B, T, C, H, W) = (B, 10, 1, 64, 64)
         
         Pipeline:
-        - decoder_z_mu: (B, T*embed_dim, 16, 16) -> (B, 128, 16, 16)
-        - Decoder:      (B, 128, 16, 16) -> (B, T*C, 64, 64)
-        - Reshape:      (B, T*C, 64, 64) -> (B, T, C, 64, 64)
+        - decoder_z_mu: (B*T, 2, 16, 16) → (B*T, 128, 16, 16)
+        - Decoder: (B*T, 128, 16, 16) → (B*T, 1, 64, 64)
+        - Reshape: (B*T, 1, 64, 64) → (B, T, 1, 64, 64)
         """
-        b = z.shape[0]
+        b_t = z.shape[0]
         
         # Step 1: decoder_z_mu
-        z = self._decoder_z_mu(z)    # (B, 128, 16, 16)
+        z = self._decoder_z_mu(z)  # (B*T, 128, 16, 16)
         
         # Step 2: Decoder
-        dec = self._decoder(z)       # (B, T*C, 64, 64)
+        dec = self._decoder(z)  # (B*T, 1, 64, 64)
         
         # Step 3: Reshape back to sequence
-        _, tc, h_out, w_out = dec.shape 
-        c_out = tc // self.seq_len
-        dec = dec.view(b, self.seq_len, c_out, h_out, w_out)   # (B, T, C, 64, 64)
-
+        b = b_t // self.seq_len
+        t = self.seq_len
+        _, c_out, h_out, w_out = dec.shape
+        dec = dec.view(b, t, c_out, h_out, w_out)  # (B, T, 1, 64, 64)
+        
         return dec
-            
 
     def forward(self, input_seq, x_map=None, sample_posterior=False):
         """
         input_seq: (B, T, C, H, W)
-        x_map: (unused in this pipeline)
+        x_map: (B, T, C, H, W)
         """
-        posterior = self.encode(input_seq)
-        z = posterior.sample() if sample_posterior else posterior.mode()  # (B, T*embed_dim, 16, 16)
+        posterior = self.encode(input_seq, x_map)
+        z = posterior.sample() if sample_posterior else posterior.mode()  # (B*T, 2, 16, 16)
         dec = self.decode(z)
         return dec, posterior
 
@@ -773,17 +806,19 @@ class SequenceAutoencoderKL(pl.LightningModule):
         """
         maps = preprocess_batch(batch, device=self.device)
         x = maps["mask_binary_maps"]  # (B, T, 1, H, W)
+        x_map = maps["input_occ_grid_map"]  # (B, map_channels, H, W)
         x = x.reshape(-1, SEQ_LEN, 1, IMG_SIZE, IMG_SIZE)
+        x_map = x_map.reshape(-1, 1, IMG_SIZE, IMG_SIZE)
         
-        return x
+        return x, x_map
 
     # ------------------------------------------------------------------
     # Training / validation
     # Manual optimization for modern Lightning multi-optimizer support
     # ------------------------------------------------------------------
     def training_step(self, batch, batch_idx):
-        inputs = self.get_input(batch, self.image_key)              # (B,T,C,H,W)
-        reconstructions, posterior = self(inputs)          # recon: (B,T,C,H,W)
+        inputs, x_map = self.get_input(batch, self.image_key)              # (B,T,C,H,W)
+        reconstructions, posterior = self(inputs, x_map)          # recon: (B,T,C,H,W)
 
         opt_ae = self.optimizers()
 
@@ -808,8 +843,8 @@ class SequenceAutoencoderKL(pl.LightningModule):
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx):
-        inputs = self.get_input(batch, self.image_key)
-        reconstructions, posterior = self(inputs)
+        inputs, x_map = self.get_input(batch, self.image_key)
+        reconstructions, posterior = self(inputs, x_map)
 
         b, t, c, h, w = inputs.shape
 
@@ -828,6 +863,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         lr = self.learning_rate
 
         opt_ae = torch.optim.Adam(
+            list(self.temporal_encoder.parameters()) +
             list(self._encoder.parameters()) +
             list(self._decoder.parameters()) +
             list(self._encoder_z_mu.parameters()) +
@@ -867,9 +903,10 @@ class SequenceAutoencoderKL(pl.LightningModule):
             if i >= num_batches: 
                 break
 
-            x = self.get_input(batch, self.image_key)
+            x, x_map = self.get_input(batch, self.image_key)
             x = x.to(self.device)  # (B,T,1,H,W)
-            posterior = self.encode(x)
+            x_map = x_map.to(self.device)  # (B, map_channels, H, W)
+            posterior = self.encode(x, x_map)
             z = posterior.mode() if use_mode else posterior.sample()    # (B,C_lat,H_lat,W_lat)
 
             mean_list.append(z.mean().item())
@@ -913,15 +950,17 @@ class SequenceAutoencoderKL(pl.LightningModule):
     def log_images(self, batch, only_inputs=False, **kwargs):
         """
         Returns:
-            inputs:          (B, C*T, H, W) for easy grid logging
-            reconstructions: (B, C*T, H, W)
-            samples:         (B, C*T, H, W)
+            inputs:          (B*T, C, H, W) for easy grid logging
+            reconstructions: (B*T, C, H, W)
+            samples:         (B*T, C, H, W)
         """
         log = dict()
-        x = self.get_input(batch, self.image_key)
+        x, x_map = self.get_input(batch, self.image_key)
         x = x.to(self.device)   # (B, T, C, H, W)
+        x_map = x_map.to(self.device)  # (B, map_channels, H, W)
         b, t, c, h, w = x.shape
-        xrec, posterior = self(x)                                   # (B,T,C,H,W)
+        xrec, posterior = self(x, x_map)                                   # (B,T,C,H,W)
+
 
         # batch 0
         gt_seq = x[0]         # (T,C,H,W)
@@ -937,7 +976,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         grid = make_grid(panel, nrow=10, normalize=False, value_range=(0, 1))
 
         grid_np = grid.detach().cpu().permute(1, 2, 0).numpy()
-
+        
         if grid_np.shape[-1] == 1:
             grid_np = grid_np[..., 0]
 

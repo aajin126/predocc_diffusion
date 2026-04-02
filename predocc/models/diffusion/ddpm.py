@@ -429,7 +429,6 @@ class DDPM(pl.LightningModule):
         lr = self.learning_rate
         params = (
                 list(self.model.parameters())+
-                list(self.convlstm_cell.parameters()) +
                 list(self.cond_encoder.parameters()) +
                 list(self.cond_proj.parameters()))
         
@@ -1434,7 +1433,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
         first_stage_config,
         cond_stage_config,
         first_stage_ckpt_path=None,
-        embedding_dim = 128,
         convlstm_hidden_dim = 32,
         *args,**kwargs,):
         super().__init__(
@@ -1445,19 +1443,11 @@ class PredOccLatentDiffusion(LatentDiffusion):
         )
 
         self.convlstm_hidden_dim = convlstm_hidden_dim
-        self.embedding_dim = embedding_dim
         self.first_stage_ckpt_path = first_stage_ckpt_path
         ignore_keys = kwargs.pop("ignore_keys", [])
 
         if self.first_stage_ckpt_path is not None:
             self.load_first_stage(self.first_stage_ckpt_path)
-
-        self.convlstm_cell = ConvLSTMCell(
-            input_dim=1,
-            hidden_dim=self.convlstm_hidden_dim,   # 32
-            kernel_size=(3, 3),
-            bias=True,
-        )
 
         self.cond_encoder = Encoder(
             in_channels=self.convlstm_hidden_dim,  # 32
@@ -1583,7 +1573,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         if mask_binary_maps is not None:
             with torch.no_grad():
                 # Frame-wise encode: (B, T, 1, H, W) -> (B, T*embed_dim, 16, 16)
-                encoder_posterior = self.first_stage_model.encode(mask_binary_maps)
+                encoder_posterior = self.first_stage_model.encode(mask_binary_maps, input_occ_grid_map)
                 z = self.get_first_stage_encoding(encoder_posterior)  # (B, T*embed_dim, 16, 16)
         
         out = [cond, z]
@@ -1608,8 +1598,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         c: (B, T*C_cond, H_lat, W_lat)
         """
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
-        t_emb = timestep_embedding(t, self.embedding_dim)  # (B, embedding_dim)
-        return self.p_losses(x, c, t_emb, *args, **kwargs)
+        return self.p_losses(x, c, t, *args, **kwargs)
 
     def shared_step(self, batch, **kwargs):
         
@@ -1617,10 +1606,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         
         cond, z = self.get_encoding(input_binary_maps, mask_binary_maps, input_occ_grid_map)
 
-        B, C, H, W = cond.shape
-        T = self.first_stage_model.seq_len
-
-        cond = cond.unsqueeze(2).repeat(1, 1, T, 1, 1).reshape(B, C*T, H, W) # (B, 32*T, 16, 16)
+        cond = cond.repeat_interleave(self.first_stage_model.seq_len, dim=0) 
 
         loss, loss_dict = self(z, cond) # forward
 
@@ -1726,13 +1712,11 @@ class PredOccLatentDiffusion(LatentDiffusion):
         t0 = time.perf_counter()
         c, _ = self.get_encoding(x_in, x_gt, x_occ)
 
-        seq_len = self.first_stage_model.seq_len
-
         # 1) duplicate condition
         c = c.repeat_interleave(K, dim=0)             # (B_vis*K, C, H, W)
 
         # 2) expand time axis
-        cond_exp = c.repeat_interleave(T, dim=1)      # (B_vis*K, T*C, H, W)
+        cond_exp = c.repeat_interleave(T, dim=0)      # (T*B_vis*K, C, H, W)
         
         # DDIM full sampling from random noise -> predicted future latent per frame
         # batch_size=N*T will generate N*T independent samples
@@ -1745,13 +1729,13 @@ class PredOccLatentDiffusion(LatentDiffusion):
             # Output: samples (N, T*2, 16, 16) 
             samples, _ = self.sample_log(
                 cond=cond_exp,
-                batch_size=cond_exp.shape[0],
+                batch_size=N*T,
                 ddim=True,
                 ddim_steps=ddim_steps,
                 eta=ddim_eta
             )
 
-        # samples shape: (N, T*2, 16, 16) - each frame independently denoised
+        # samples shape: (T*N, 2, 16, 16) - each frame independently denoised
         # decode sampled latent to future sequence
         pred_seq = self.decode_first_stage(samples)   # (B_vis*K, T, 1, H, W)
 
