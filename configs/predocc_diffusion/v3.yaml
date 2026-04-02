@@ -12,6 +12,7 @@ model:
     parameterization: eps
     monitor: val/loss
     use_ema: True
+    convlstm_hidden_dim: 32
     scale_factor: 0.374106
 
     first_stage_ckpt_path: "./pretrained_models/first_stage_models/AE/v7.0/model.ckpt"
@@ -76,7 +77,7 @@ model:
             cond_emb: False
             spade: True
             spade_dim: 128
-            cond_ch: 20
+            cond_ch: 32
             sigma_max: 1.0
             sigma_min: 0.01
             num_scales: 1000
@@ -84,7 +85,7 @@ model:
             channels: 2
             image_size: 16
             num_frames: 10
-            num_frames_cond: 10
+            num_frames_cond: 1
 data:
   target: main.DataModuleFromConfig
   params:

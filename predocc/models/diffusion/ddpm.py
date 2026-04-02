@@ -32,6 +32,8 @@ from modules.distributions.distributions import normal_kl, DiagonalGaussianDistr
 from models.autoencoder import IMG_SIZE, VQModelInterface, IdentityFirstStage, AutoencoderKL, SequenceAutoencoderKL
 from modules.diffusionmodules.util import make_beta_schedule, extract_into_tensor, noise_like
 from models.diffusion.ddim import DDIMSampler
+from models.convlstm import ConvLSTMCell
+from models.autoencoder import Encoder
 
 __conditioning_keys__ = {'concat': 'c_concat',
                          'crossattn': 'c_crossattn',
@@ -1422,13 +1424,14 @@ class LatentDiffusion(DDPM):
         return x
 
 class PredOccLatentDiffusion(LatentDiffusion):
-    """LatentDiffusion with SPADE conditioning from stacked past-frame latents."""
+    """LatentDiffusion with ConvLSTM conditioning from h_enc concatenated with x_map."""
 
     def __init__(
         self,
         first_stage_config,
         cond_stage_config,
         first_stage_ckpt_path=None,
+        convlstm_hidden_dim = 32,
         *args,**kwargs,):
         super().__init__(
             first_stage_config=first_stage_config,
@@ -1437,11 +1440,33 @@ class PredOccLatentDiffusion(LatentDiffusion):
             **kwargs,
         )
 
+        self.convlstm_hidden_dim = convlstm_hidden_dim
         self.first_stage_ckpt_path = first_stage_ckpt_path
         ignore_keys = kwargs.pop("ignore_keys", [])
 
         if self.first_stage_ckpt_path is not None:
             self.load_first_stage(self.first_stage_ckpt_path)
+
+        self.convlstm_cell = ConvLSTMCell(
+            input_dim=1,
+            hidden_dim=self.convlstm_hidden_dim,
+            kernel_size=(3, 3),
+            bias=True,
+        )
+
+        self.cond_encoder = Encoder(
+            in_channels=self.convlstm_hidden_dim + 1,
+            num_hiddens=128,
+            num_residual_layers=2,
+            num_residual_hiddens=64,
+        )
+
+        self.cond_proj = nn.Conv2d(
+            in_channels=128,
+            out_channels=self.convlstm_hidden_dim,
+            kernel_size=1,
+            stride=1,
+        )
 
     def get_input(
         self,
@@ -1570,26 +1595,34 @@ class PredOccLatentDiffusion(LatentDiffusion):
         - input_binary_maps: past sequence (B, T, 1, H, W)
         - mask_binary_maps: future sequence (B, T, 1, H, W)
                 - Returns: [cond_dict, z]
-                    - cond_dict: conditioning payload with past-frame latent stack
+                    - cond_dict: conditioning payload with ConvLSTM hidden state + x_map feature map
           - z: future latent reshaped in DDPM from (B*T, embed_dim, 16, 16)
                to (B, T*embed_dim, 16, 16)
         """
-        b, cond_seq_len, _, _, _ = input_binary_maps.shape
+        b, seq_len, _, h, w = input_binary_maps.shape
 
-        with torch.no_grad():
-            cond_posterior = self.first_stage_model.encode(input_binary_maps)
-        cond = self.get_first_stage_encoding(cond_posterior)
-        cond = self._stack_sequence_latent(cond, batch_size=b, seq_len=cond_seq_len)
+        h_enc, c_enc = self.convlstm_cell.init_hidden(batch_size=b, image_size=(h, w))
+        for t in range(seq_len):
+            h_enc, c_enc = self.convlstm_cell(
+                input_tensor=input_binary_maps[:, t],
+                cur_state=[h_enc, c_enc]
+            )
+
+        if input_occ_grid_map is None:
+            raise ValueError("input_occ_grid_map is required for ConvLSTM conditioning.")
+
+        cond_input = torch.cat([h_enc, input_occ_grid_map], dim=1)
+        cond_feat = self.cond_encoder(cond_input)
+        cond = self.cond_proj(cond_feat)
 
         # 2) Future sequence -> frame-wise latent
         z = None
         if mask_binary_maps is not None:
-            future_seq_len = mask_binary_maps.shape[1]
             with torch.no_grad():
                 # Frame-wise encode: (B, T, 1, H, W) -> (B*T, embed_dim, 16, 16)
                 encoder_posterior = self.first_stage_model.encode(mask_binary_maps)
             z = self.get_first_stage_encoding(encoder_posterior)  # (B*T, embed_dim, 16, 16)
-            z = self._stack_sequence_latent(z, batch_size=b, seq_len=future_seq_len)  # (B, T*embed_dim, 16, 16)
+            z = self._stack_time_channel_latent(z, batch_size=b)  # (B, T*embed_dim, 16, 16)
 
         out = [{"c_spade": cond}, z]
         
@@ -1617,9 +1650,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
     def shared_step(self, batch, **kwargs):
         
-        input_binary_maps, mask_binary_maps, _ = self.get_input(batch)
+        input_binary_maps, mask_binary_maps, input_occ_grid_map = self.get_input(batch)
         
-        cond, z = self.get_encoding(input_binary_maps, mask_binary_maps)
+        cond, z = self.get_encoding(input_binary_maps, mask_binary_maps, input_occ_grid_map)
 
         loss = self(z, cond) # forward
 
@@ -1712,7 +1745,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         log = dict()
 
-        x_in, x_gt, _ = self.get_input(batch)
+        x_in, x_gt, x_map = self.get_input(batch)
 
         B_vis = 1                    # number of condition
         K = N                        # number of multimodal samples
@@ -1720,9 +1753,10 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         x_in = x_in[:B_vis]
         x_gt = x_gt[:B_vis]
+        x_map = x_map[:B_vis]
 
         t0 = time.perf_counter()
-        c, _ = self.get_encoding(x_in, x_gt)
+        c, _ = self.get_encoding(x_in, x_gt, x_map)
 
         # 1) duplicate condition
         c = {
@@ -1790,7 +1824,12 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         # LDM version check 
         print(f"{self.__class__.__name__}: Optimizing diffusion only")
-        params = list(self.model.parameters())
+        params = (
+            list(self.model.parameters()) +
+            list(self.convlstm_cell.parameters()) +
+            list(self.cond_encoder.parameters()) +
+            list(self.cond_proj.parameters())
+        )
 
 
         if self.learn_logvar:
