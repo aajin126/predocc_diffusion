@@ -32,13 +32,11 @@ from modules.distributions.distributions import normal_kl, DiagonalGaussianDistr
 from models.autoencoder import IMG_SIZE, VQModelInterface, IdentityFirstStage, AutoencoderKL, SequenceAutoencoderKL
 from modules.diffusionmodules.util import make_beta_schedule, extract_into_tensor, noise_like
 from models.diffusion.ddim import DDIMSampler
-from models.convlstm import ConvLSTMCell
-from models.autoencoder import Decoder
-from models.autoencoder import Encoder
 
 __conditioning_keys__ = {'concat': 'c_concat',
                          'crossattn': 'c_crossattn',
-                         'adm': 'y'}
+                         'adm': 'y',
+                         'spade': 'c_spade'}
 
 
 def disabled_train(self, mode=True):
@@ -426,11 +424,7 @@ class DDPM(pl.LightningModule):
 
     def configure_optimizers(self):
         lr = self.learning_rate
-        params = (
-                list(self.model.parameters())+
-                list(self.convlstm_cell.parameters()) +
-                list(self.cond_encoder.parameters()) +
-                list(self.cond_proj.parameters()))
+        params = (list(self.model.parameters()))
         
         if self.learn_logvar:
             params = params + [self.logvar]
@@ -925,7 +919,9 @@ class LatentDiffusion(DDPM):
         else:
             if not isinstance(cond, list):
                 cond = [cond]
-            key = 'c_concat' if self.model.conditioning_key == 'concat' else 'c_crossattn'
+            if self.model.conditioning_key not in __conditioning_keys__:
+                raise NotImplementedError(f"Unsupported conditioning key {self.model.conditioning_key}")
+            key = __conditioning_keys__[self.model.conditioning_key]
             cond = {key: cond}
 
         if hasattr(self, "split_input_params"):
@@ -1426,14 +1422,13 @@ class LatentDiffusion(DDPM):
         return x
 
 class PredOccLatentDiffusion(LatentDiffusion):
-    """LatentDiffusion with ConvLSTM conditioning."""
+    """LatentDiffusion with SPADE conditioning from stacked past-frame latents."""
 
     def __init__(
         self,
         first_stage_config,
         cond_stage_config,
         first_stage_ckpt_path=None,
-        convlstm_hidden_dim = 32,
         *args,**kwargs,):
         super().__init__(
             first_stage_config=first_stage_config,
@@ -1442,33 +1437,11 @@ class PredOccLatentDiffusion(LatentDiffusion):
             **kwargs,
         )
 
-        self.convlstm_hidden_dim = convlstm_hidden_dim
         self.first_stage_ckpt_path = first_stage_ckpt_path
         ignore_keys = kwargs.pop("ignore_keys", [])
 
         if self.first_stage_ckpt_path is not None:
             self.load_first_stage(self.first_stage_ckpt_path)
-
-        self.convlstm_cell = ConvLSTMCell(
-            input_dim=1,
-            hidden_dim=self.convlstm_hidden_dim,   # 32
-            kernel_size=(3, 3),
-            bias=True,
-        )
-
-        self.cond_encoder = Encoder(
-            in_channels=self.convlstm_hidden_dim,  # 32
-            num_hiddens=128,
-            num_residual_layers=2,
-            num_residual_hiddens=64,
-        )
-
-        self.cond_proj = nn.Conv2d(
-            in_channels=128,
-            out_channels=self.convlstm_hidden_dim,  # 32
-            kernel_size=1,
-            stride=1,
-        )
 
     def get_input(
         self,
@@ -1541,6 +1514,47 @@ class PredOccLatentDiffusion(LatentDiffusion):
     def encode_first_stage(self, x):
         return self.first_stage_model.encode(x)
 
+    def _stack_sequence_latent(self, z, batch_size, seq_len):
+        embed_dim = self.first_stage_model.embed_dim
+
+        if z.dim() != 4:
+            raise ValueError(f"Expected 4D latent tensor, got shape {tuple(z.shape)}")
+        if z.shape[0] != batch_size * seq_len:
+            raise ValueError(
+                f"Expected first latent dimension {batch_size * seq_len}, got {z.shape[0]}"
+            )
+        if z.shape[1] != embed_dim:
+            raise ValueError(
+                f"Expected latent channels {embed_dim}, got {z.shape[1]}"
+            )
+
+        height, width = z.shape[-2:]
+        z = z.view(batch_size, seq_len, embed_dim, height, width)
+        return z.reshape(batch_size, seq_len * embed_dim, height, width)
+
+    def _stack_time_channel_latent(self, z, batch_size):
+        return self._stack_sequence_latent(
+            z,
+            batch_size=batch_size,
+            seq_len=self.first_stage_model.seq_len,
+        )
+
+    def _unstack_time_channel_latent(self, z):
+        seq_len = self.first_stage_model.seq_len
+        embed_dim = self.first_stage_model.embed_dim
+
+        if z.dim() != 4:
+            raise ValueError(f"Expected 4D latent tensor, got shape {tuple(z.shape)}")
+        expected_channels = seq_len * embed_dim
+        if z.shape[1] != expected_channels:
+            raise ValueError(
+                f"Expected stacked latent channels {expected_channels}, got {z.shape[1]}"
+            )
+
+        batch_size, _, height, width = z.shape
+        z = z.view(batch_size, seq_len, embed_dim, height, width)
+        return z.reshape(batch_size * seq_len, embed_dim, height, width)
+
     def get_first_stage_encoding(self, encoder_posterior):
         if isinstance(encoder_posterior, DiagonalGaussianDistribution):
             z = encoder_posterior.mode()
@@ -1555,34 +1569,29 @@ class PredOccLatentDiffusion(LatentDiffusion):
         Encoding for PredOcc Diffusion with frame-wise Autoencoder:
         - input_binary_maps: past sequence (B, T, 1, H, W)
         - mask_binary_maps: future sequence (B, T, 1, H, W)
-        - Returns: [cond, z]
-          - cond: conditioning from past via ConvLSTM (B, 32, 16, 16)
-          - z: future latent via frame-wise AE (B*T, embed_dim, 16, 16)
+                - Returns: [cond_dict, z]
+                    - cond_dict: conditioning payload with past-frame latent stack
+          - z: future latent reshaped in DDPM from (B*T, embed_dim, 16, 16)
+               to (B, T*embed_dim, 16, 16)
         """
-        b, seq_len, _, h, w = input_binary_maps.shape
-        
-        # 1) Conditioning: ConvLSTM on past sequence
-        h_enc, c_enc = self.convlstm_cell.init_hidden(batch_size=b, image_size=(h, w))
-        for t in range(seq_len):
-            h_enc, c_enc = self.convlstm_cell(
-                input_tensor=input_binary_maps[:, t],
-                cur_state=[h_enc, c_enc]
-            )
-        # h_enc : (B, 32, 64, 64)
-        
-        # Encoder-based conditioning
-        cond_feat = self.cond_encoder(h_enc)       # (B, 128, 16, 16)
-        cond = self.cond_proj(cond_feat)           # (B, 32, 16, 16)
+        b, cond_seq_len, _, _, _ = input_binary_maps.shape
+
+        with torch.no_grad():
+            cond_posterior = self.first_stage_model.encode(input_binary_maps)
+        cond = self.get_first_stage_encoding(cond_posterior)
+        cond = self._stack_sequence_latent(cond, batch_size=b, seq_len=cond_seq_len)
 
         # 2) Future sequence -> frame-wise latent
         z = None
         if mask_binary_maps is not None:
+            future_seq_len = mask_binary_maps.shape[1]
             with torch.no_grad():
                 # Frame-wise encode: (B, T, 1, H, W) -> (B*T, embed_dim, 16, 16)
                 encoder_posterior = self.first_stage_model.encode(mask_binary_maps)
-                z = self.get_first_stage_encoding(encoder_posterior)  # (B*T, embed_dim, 16, 16)
+            z = self.get_first_stage_encoding(encoder_posterior)  # (B*T, embed_dim, 16, 16)
+            z = self._stack_sequence_latent(z, batch_size=b, seq_len=future_seq_len)  # (B, T*embed_dim, 16, 16)
 
-        out = [cond, z]
+        out = [{"c_spade": cond}, z]
         
         return out
 
@@ -1600,8 +1609,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
     def forward(self, x, c, *args, **kwargs):
         """
-        x: (B*T, C_lat, H_lat, W_lat)
-        c: (B*T, C_cond, H_lat, W_lat)
+        x: (B, C_lat, H_lat, W_lat)
+        c: (B, C_cond, H_lat, W_lat)
         """
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
         return self.p_losses(x, c, t, *args, **kwargs)
@@ -1611,8 +1620,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
         input_binary_maps, mask_binary_maps, _ = self.get_input(batch)
         
         cond, z = self.get_encoding(input_binary_maps, mask_binary_maps)
-
-        cond = cond.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (B*T, 32, 16, 16)
 
         loss = self(z, cond) # forward
 
@@ -1651,7 +1658,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         """
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        model_output = self.apply_model(x_noisy, t, {"c_concat": [cond]})
+        model_output = self.apply_model(x_noisy, t, cond)
 
         loss_dict = {}
         prefix = "train" if self.training else "val"
@@ -1717,33 +1724,26 @@ class PredOccLatentDiffusion(LatentDiffusion):
         t0 = time.perf_counter()
         c, _ = self.get_encoding(x_in, x_gt)
 
-        seq_len = self.first_stage_model.seq_len
-
         # 1) duplicate condition
-        c = c.repeat_interleave(K, dim=0)             # (B_vis*K, C, H, W)
-
-        # 2) expand time axis
-        cond_exp = c.repeat_interleave(T, dim=0)      # (B_vis*K*T, C, H, W)
+        c = {
+            "c_spade": c["c_spade"].repeat_interleave(K, dim=0),
+        }
         
-        # DDIM full sampling from random noise -> predicted future latent per frame
-        # batch_size=N*T will generate N*T independent samples
+        # DDIM full sampling from random noise -> predicted stacked future latent
         if torch.cuda.is_available():
             torch.cuda.synchronize()
 
         with self.ema_scope("Plotting"):
-            # DDIM samples N*T latents independently
-            # Input: cond (N*T, 32, 16, 16), batch_size=N*T
-            # Output: samples (N*T, 2, 16, 16) 
-            samples, _ = self.sample_log(
-                cond=cond_exp,
-                batch_size=cond_exp.shape[0],
+            samples_stacked, _ = self.sample_log(
+                cond=c,
+                batch_size=c["c_spade"].shape[0],
                 ddim=True,
                 ddim_steps=ddim_steps,
                 eta=ddim_eta
             )
 
-        # samples shape: (N*T, 2, 16, 16) - each frame independently denoised
-        # decode sampled latent to future sequence
+        # samples_stacked: (B_vis*K, T*embed_dim, 16, 16)
+        samples = self._unstack_time_channel_latent(samples_stacked)  # (B_vis*K*T, embed_dim, 16, 16)
         pred_seq = self.decode_first_stage(samples)   # (B_vis*K, T, 1, H, W)
 
         if torch.cuda.is_available():
@@ -1790,12 +1790,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         # LDM version check 
         print(f"{self.__class__.__name__}: Optimizing diffusion only")
-        params = (
-            list(self.model.parameters()) +
-            list(self.convlstm_cell.parameters()) + 
-            list(self.cond_encoder.parameters()) + 
-            list(self.cond_proj.parameters())
-        )
+        params = list(self.model.parameters())
 
 
         if self.learn_logvar:
@@ -1819,9 +1814,9 @@ class DiffusionWrapper(pl.LightningModule):
         super().__init__()
         self.diffusion_model = instantiate_from_config(diff_model_config)
         self.conditioning_key = conditioning_key
-        assert self.conditioning_key in [None, 'concat', 'crossattn', 'hybrid', 'adm']
+        assert self.conditioning_key in [None, 'concat', 'crossattn', 'hybrid', 'adm', 'spade']
 
-    def forward(self, x, t, c_concat: list = None, c_crossattn: list = None):
+    def forward(self, x, t, c_concat: list = None, c_crossattn: list = None, c_spade: list = None):
         if self.conditioning_key is None:
             out = self.diffusion_model(x, t)
         elif self.conditioning_key == 'concat':
@@ -1837,6 +1832,9 @@ class DiffusionWrapper(pl.LightningModule):
         elif self.conditioning_key == 'adm':
             cc = c_crossattn[0]
             out = self.diffusion_model(x, t, y=cc)
+        elif self.conditioning_key == 'spade':
+            cond = c_spade[0] if isinstance(c_spade, list) else c_spade
+            out = self.diffusion_model(x, t, cond=cond)
         else:
             raise NotImplementedError()
 
