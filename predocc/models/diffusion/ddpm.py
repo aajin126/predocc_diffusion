@@ -424,11 +424,7 @@ class DDPM(pl.LightningModule):
 
     def configure_optimizers(self):
         lr = self.learning_rate
-        params = (
-                list(self.model.parameters())+
-                list(self.convlstm_cell.parameters()) +
-                list(self.cond_encoder.parameters()) +
-                list(self.cond_proj.parameters()))
+        params = (list(self.model.parameters()))
         
         if self.learn_logvar:
             params = params + [self.logvar]
@@ -1447,13 +1443,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
         if self.first_stage_ckpt_path is not None:
             self.load_first_stage(self.first_stage_ckpt_path)
 
-        self.convlstm_cell = ConvLSTMCell(
-            input_dim=1,
-            hidden_dim=self.convlstm_hidden_dim,   # 32
-            kernel_size=(3, 3),
-            bias=True,
-        )
-
         self.cond_encoder = Encoder(
             in_channels=self.convlstm_hidden_dim,  # 32
             num_hiddens=128,
@@ -1573,7 +1562,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         if mask_binary_maps is not None:
             with torch.no_grad():
                 encoder_posterior = self.encode_first_stage(mask_binary_maps, input_occ_grid_map)  # sequence input
-                z = self.get_first_stage_encoding(encoder_posterior)                  # (B,C_lat,H_lat,W_lat)
+                z = self.get_first_stage_encoding(encoder_posterior)
 
         out = [cond, z]
 
@@ -1774,9 +1763,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
         print(f"{self.__class__.__name__}: Optimizing diffusion only")
         params = (
             list(self.model.parameters()) +
-            # list(self.convlstm_cell.parameters()) + # LDM v1.1
-            list(self.cond_encoder.parameters()) +  # LDM v1.1, v1.2, v1.3
-            list(self.cond_proj.parameters())       # LDM v1.1, v1.2, v1.3
+            list(self.cond_encoder.parameters()) + 
+            list(self.cond_proj.parameters())
         )
 
 

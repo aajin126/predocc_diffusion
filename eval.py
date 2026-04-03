@@ -106,7 +106,7 @@ def load_ldm_model(ckpt_path, base_configs, unknown, device):
 
 
 @torch.no_grad()
-def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=1.0, 
+def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=10, ddim_eta=1.0, 
                  occ_thr=0.3, save_images=True, num_batches=None, num_samples=1):
     """Evaluate LDM model on test/validation dataset"""
     
@@ -133,6 +133,7 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
             # Expand conditioning for T frames
             seq_len = model.first_stage_model.seq_len
             c_exp = c.repeat_interleave(seq_len, dim=0)  # (N*T, 32, 16, 16)
+            c_exp = c_exp.repeat_interleave(num_samples, dim=0)  # (N*T*num_samples, 32, 16, 16)
 
 
             # Measure sampling time
@@ -150,11 +151,10 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
                     eta=ddim_eta
                 )
 
-            # samples shape: (N, 2, 16, 16)
+            # samples shape: (N*T, 2, 16, 16)
             # decode expects: (B*T, 2, 16, 16) where B=N, T=10
             # Repeat samples for each timestep
-            samples = samples.repeat_interleave(model.first_stage_model.seq_len, dim=0)  # (N*T, 2, 16, 16)
-                    
+     
             # Decode latent to sequence
             pred_seq = model.decode_first_stage(samples)  # (num_samples, T, 1, H, W)
             
