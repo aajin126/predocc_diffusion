@@ -2,7 +2,7 @@
 """
 LDM evaluation script
 Evaluates PredOccLatentDiffusion model with DDIM sampling on test/validation dataset
-Computes IoU, prediction time, and saves visualizations
+Computes IoU, WMSE, prediction time, and saves visualizations
 """
 
 import sys
@@ -40,7 +40,7 @@ MAP_Y_LIMIT = [-3.2, 3.2]   # Map limits on the y-axis
 RESOLUTION = 0.1        # Grid resolution in [m]'
 TRESHOLD_P_OCC = 0.8    # Occupancy threshold
 all_rows = []    
-csv_path = os.path.join("output", "v7.7.0", "eval_table.csv")
+csv_path = os.path.join("output", "ldm2.1", "eval_table.csv")
 
 def compute_iou(pred, gt, occ_thr=0.3):
     pred_occ = (pred > occ_thr)
@@ -52,6 +52,17 @@ def compute_iou(pred, gt, occ_thr=0.3):
     iou = inter / (union + 1e-6)
 
     return iou
+
+
+def compute_wmse(pred, gt, occ_thr=0.3, occupied_weight=2.0, free_weight=1.0):
+    gt_occ = (gt > occ_thr).float()
+    weights = torch.where(
+        gt_occ > 0,
+        torch.full_like(gt, occupied_weight),
+        torch.full_like(gt, free_weight)
+    )
+    weighted_sq_error = weights * (pred - gt).pow(2)
+    return weighted_sq_error.sum() / (weights.sum() + 1e-6)
 
 def load_ldm_model(ckpt_path, base_configs, unknown, device):
 
@@ -107,7 +118,8 @@ def load_ldm_model(ckpt_path, base_configs, unknown, device):
 
 @torch.no_grad()
 def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=1.0, 
-                 occ_thr=0.3, save_images=True, num_batches=None, num_samples=1):
+                 occ_thr=0.3, save_images=True, num_batches=None, num_samples=1,
+                 wmse_occ_weight=2.0, wmse_free_weight=1.0):
     """Evaluate LDM model on test/validation dataset"""
     
     os.makedirs(output_dir, exist_ok=True)
@@ -129,7 +141,7 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
                                                         )
 
             t0 = time.perf_counter()
-            c, _ = model.get_encoding(x_in, x_gt)
+            c, _ = model.get_encoding(x_in, x_gt, x_occ_map)
             c_exp = c.repeat_interleave(model.first_stage_model.seq_len, dim=0) # (B*T, 32, 16, 16)
 
             # Measure sampling time
@@ -173,6 +185,15 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
                 gt_map = x_gt[0, t]  # (H, W)
                 pred_map = prediction_maps[t, 0]  # (H, W)
                 row[f"n={t+1}"] = float(compute_iou(pred_map, gt_map, occ_thr=occ_thr).item())
+                row[f"wmse_n={t+1}"] = float(
+                    compute_wmse(
+                        pred_map,
+                        gt_map,
+                        occ_thr=occ_thr,
+                        occupied_weight=wmse_occ_weight,
+                        free_weight=wmse_free_weight,
+                    ).item()
+                )
             results.append(row)
 
             if (batch_idx + 1) % 100 == 0:
@@ -254,7 +275,23 @@ def get_parser():
         "--occ_thr",
         type=float,
         default=0.3,
-        help="Occupancy threshold for IoU calculation"
+        help="Occupancy threshold for IoU and WMSE calculation"
+    )
+    parser.add_argument(
+        "--wmse_occ_weight",
+        "--mwse_occ_weight",
+        dest="wmse_occ_weight",
+        type=float,
+        default=2.0,
+        help="WMSE weight for occupied cells"
+    )
+    parser.add_argument(
+        "--wmse_free_weight",
+        "--mwse_free_weight",
+        dest="wmse_free_weight",
+        type=float,
+        default=1.0,
+        help="WMSE weight for free cells"
     )
     parser.add_argument(
         "--num_batches",
@@ -310,7 +347,9 @@ if __name__ == "__main__":
         occ_thr=opt.occ_thr,
         save_images=not opt.no_images,
         num_batches=opt.num_batches,
-        num_samples=opt.num_samples
+        num_samples=opt.num_samples,
+        wmse_occ_weight=opt.wmse_occ_weight,
+        wmse_free_weight=opt.wmse_free_weight,
     )
     
     print(f"Evaluation complete! Results saved to {opt.output_dir}")
