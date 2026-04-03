@@ -48,7 +48,7 @@ model:
 
 
     unet_config:
-      target: modules.diffusionmodules.openaimodel.UNetModel
+      target: modules.diffusionmodules.unet_latent_shift.UNetModel
       params:
         image_size: 16
         in_channels: 35  # 34 : x_noisy(2) + cond(32) # 4 : x_noisy(2) + cond(2)
