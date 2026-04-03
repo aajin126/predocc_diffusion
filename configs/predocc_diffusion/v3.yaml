@@ -58,6 +58,9 @@ model:
         num_res_blocks: 1
         channel_mult: [1, 2]
         num_heads: 8
+        use_temporal_shift: True
+        num_frames: 10
+        shift_fold_div: 3
         use_spatial_transformer: False
         use_checkpoint: True
         legacy: False
