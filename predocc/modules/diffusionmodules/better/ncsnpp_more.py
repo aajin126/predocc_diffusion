@@ -254,7 +254,7 @@ class SPADE_NCSNpp(nn.Module):
 
       if i_level != self.num_resolutions - 1:
         if self.resblock_type == 'ddpm':
-          h = modules[m_idx](hs[-1], cond=cond)
+          h = modules[m_idx](hs[-1])
         else:
           h = modules[m_idx](hs[-1], temb, cond=cond)
         m_idx += 1
@@ -298,7 +298,7 @@ class SPADE_NCSNpp(nn.Module):
 
       if i_level != 0:
         if self.resblock_type == 'ddpm':
-          h = modules[m_idx](h, cond=cond)
+          h = modules[m_idx](h)
           m_idx += 1
         else:
           h = modules[m_idx](h, temb, cond=cond)

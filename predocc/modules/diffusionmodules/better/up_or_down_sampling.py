@@ -112,22 +112,21 @@ def upsample_conv_2d(x, w, k=None, factor=2, gain=1):
   k = _setup_kernel(k) * (gain * (factor ** 2))
   p = (k.shape[0] - factor) - (convW - 1)
 
-  stride = (factor, factor)
+  conv_stride = (factor, factor)
 
   # Determine data dimensions.
-  stride = [1, 1, factor, factor]
   output_shape = ((_shape(x, 2) - 1) * factor + convH, (_shape(x, 3) - 1) * factor + convW)
-  output_padding = (output_shape[0] - (_shape(x, 2) - 1) * stride[0] - convH,
-                    output_shape[1] - (_shape(x, 3) - 1) * stride[1] - convW)
+  output_padding = (output_shape[0] - (_shape(x, 2) - 1) * conv_stride[0] - convH,
+                    output_shape[1] - (_shape(x, 3) - 1) * conv_stride[1] - convW)
   assert output_padding[0] >= 0 and output_padding[1] >= 0
   num_groups = _shape(x, 1) // inC
 
   # Transpose weights.
   w = torch.reshape(w, (num_groups, -1, inC, convH, convW))
-  w = w[..., ::-1, ::-1].permute(0, 2, 1, 3, 4)
+  w = torch.flip(w, dims=(-1, -2)).permute(0, 2, 1, 3, 4)
   w = torch.reshape(w, (num_groups * inC, -1, convH, convW))
 
-  x = F.conv_transpose2d(x, w, stride=stride, output_padding=output_padding, padding=0)
+  x = F.conv_transpose2d(x, w, stride=conv_stride, output_padding=output_padding, padding=0)
   ## Original TF code.
   # x = tf.nn.conv2d_transpose(
   #     x,

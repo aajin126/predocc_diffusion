@@ -2,23 +2,23 @@
 import torch
 import logging
 import numpy as np
-from functools import partial
-from torch.distributions.gamma import Gamma
-from tqdm import tqdm
-from . import pndm
 
 
 def get_sigmas(config):
 
+    device = getattr(config, 'device', None)
+
     T = getattr(config.model, 'num_classes')
 
     if config.model.sigma_dist == 'geometric':
-        return torch.logspace(np.log10(config.model.sigma_begin), np.log10(config.model.sigma_end),
-                              T).to(config.device)
+        sigmas = torch.logspace(np.log10(config.model.sigma_begin), np.log10(config.model.sigma_end),
+                                T)
+        return sigmas.to(device) if device is not None else sigmas
 
     elif config.model.sigma_dist == 'linear':
-        return torch.linspace(config.model.sigma_begin, config.model.sigma_end,
-                              T).to(config.device)
+        sigmas = torch.linspace(config.model.sigma_begin, config.model.sigma_end,
+                                T)
+        return sigmas.to(device) if device is not None else sigmas
 
     elif config.model.sigma_dist == 'cosine':
         t = torch.linspace(T, 0, T+1)/T
