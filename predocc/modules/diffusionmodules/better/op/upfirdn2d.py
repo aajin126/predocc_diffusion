@@ -1,5 +1,6 @@
 import os
 os.system("unset TORCH_CUDA_ARCH_LIST")
+import warnings
 
 import torch
 from torch.nn import functional as F
@@ -8,24 +9,46 @@ from torch.utils.cpp_extension import load
 
 
 module_path = os.path.dirname(__file__)
+_upfirdn2d_op = None
+_upfirdn2d_op_load_attempted = False
 
 
-def upfirdn2d(input, kernel, up=1, down=1, pad=(0, 0)):
-    if input.device.type == "cpu":
-        out = upfirdn2d_native(
-            input, kernel, up, up, down, down, pad[0], pad[1], pad[0], pad[1]
-        )
+def _load_upfirdn2d_op():
+    global _upfirdn2d_op
+    global _upfirdn2d_op_load_attempted
 
-    else:
+    if _upfirdn2d_op_load_attempted:
+        return _upfirdn2d_op
 
-        upfirdn2d_op = load(
+    _upfirdn2d_op_load_attempted = True
+
+    try:
+        _upfirdn2d_op = load(
             "upfirdn2d",
             sources=[
                 os.path.join(module_path, "upfirdn2d.cpp"),
                 os.path.join(module_path, "upfirdn2d_kernel.cu"),
             ],
         )
+    except Exception as exc:
+        warnings.warn(
+            f"Falling back to native upfirdn2d implementation because the CUDA extension could not be built: {exc}",
+            RuntimeWarning,
+        )
+        _upfirdn2d_op = None
 
+    return _upfirdn2d_op
+
+
+def upfirdn2d(input, kernel, up=1, down=1, pad=(0, 0)):
+    upfirdn2d_op = None if input.device.type == "cpu" else _load_upfirdn2d_op()
+
+    if upfirdn2d_op is None:
+        out = upfirdn2d_native(
+            input, kernel, up, up, down, down, pad[0], pad[1], pad[0], pad[1]
+        )
+
+    else:
         class UpFirDn2dBackward(Function):
 
             @staticmethod

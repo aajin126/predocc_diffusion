@@ -4,8 +4,6 @@ N-D Bresenham line algo
 """
 import torch
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 def _bresenhamline_nslope(slope):
     """
     Normalize slope for Bresenham's line algorithm.
@@ -22,11 +20,12 @@ def _bresenhamline_nslope(slope):
     >>> _bresenhamline_nslope(s)
     array([[ 0.,  0.,  1.,  0.]])
     """
+    device = slope.device
     scale = torch.amax(torch.abs(slope), dim=1).reshape(-1, 1)
     zeroslope = (scale == 0).all(1)
-    scale[zeroslope] = torch.ones(1, dtype=torch.long).to(device)
+    scale[zeroslope] = torch.ones(1, dtype=torch.long, device=device)
     normalizedslope = slope / scale
-    normalizedslope[zeroslope] = torch.zeros(slope[0].shape).to(device)
+    normalizedslope[zeroslope] = torch.zeros(slope[0].shape, device=device)
     return normalizedslope
 
 def _bresenhamlines(start, end, max_iter):
@@ -55,13 +54,14 @@ def _bresenhamlines(start, end, max_iter):
             [ 0,  0, -5,  0],
             [ 0,  0, -6,  0]]])
     """
+    device = start.device
     if max_iter == -1:
         max_iter = torch.amax(torch.amax(torch.abs(end - start), dim=1))
     npts, dim = start.shape
     nslope = _bresenhamline_nslope(end - start)
 
     # steps to iterate on
-    stepseq = torch.arange(1, max_iter + 1).to(device)
+    stepseq = torch.arange(1, max_iter + 1, device=device)
     stepmat = stepseq.repeat(dim, 1) #np.tile(stepseq, (dim, 1)).T
     stepmat = stepmat.T
 
