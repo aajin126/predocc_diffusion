@@ -106,7 +106,7 @@ def load_ldm_model(ckpt_path, base_configs, unknown, device):
 
 
 @torch.no_grad()
-def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=1.0, 
+def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=10, ddim_eta=1.0, 
                  occ_thr=0.3, save_images=True, num_batches=None, num_samples=1):
     """Evaluate LDM model on test/validation dataset"""
     
@@ -141,7 +141,7 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
             with model.ema_scope("Evaluation"):
                 z_samples, _ = model.sample_log(
                     cond=c_exp,
-                    batch_size=num_samples * SEQ_LEN,
+                    batch_size=c_exp.shape[0],
                     ddim=True,
                     ddim_steps=ddim_steps,
                     eta=ddim_eta
