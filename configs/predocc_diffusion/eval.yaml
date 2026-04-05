@@ -7,12 +7,11 @@ model:
     log_every_t: 200
     timesteps: 1000
     image_size: 16
-    channels: 2
-    conditioning_key: concat
+    channels: 20
+    conditioning_key: spade
     parameterization: eps
     monitor: val/loss
     use_ema: True
-    convlstm_hidden_dim: 32
     scale_factor: 0.374106
 
     first_stage_ckpt_path: "./pretrained_models/first_stage_models/AE/v7.0/model.ckpt"
@@ -48,19 +47,45 @@ model:
 
 
     unet_config:
-      target: modules.diffusionmodules.openaimodel.UNetModel
+      target: modules.diffusionmodules.better.predocc_unet.UNetModel
       params:
-        image_size: 16
-        in_channels: 34  # 34 : x_noisy(2) + cond(32) # 4 : x_noisy(2) + cond(2)
-        out_channels: 2
-        model_channels: 128
-        attention_resolutions: [4]
-        num_res_blocks: 1
-        channel_mult: [1, 2]
-        num_heads: 8
-        use_spatial_transformer: False
-        use_checkpoint: True
-        legacy: False
+        config:
+          model:
+            arch: unetmore
+            version: DDPM
+            gamma: False
+            time_conditional: True
+            dropout: 0.0
+            sigma_dist: linear
+            sigma_begin: 0.02
+            sigma_end: 0.0001
+            num_classes: 1000
+            ema: True
+            ema_rate: 0.999
+            spec_norm: False
+            normalization: InstanceNorm++
+            nonlinearity: swish
+            ngf: 128
+            ch_mult: [1, 2]
+            num_res_blocks: 1
+            attn_resolutions: [4]
+            n_head_channels: 16
+            conditional: True
+            noise_in_cond: False
+            output_all_frames: False
+            cond_emb: False
+            spade: True
+            spade_dim: 128
+            cond_ch: 20
+            sigma_max: 1.0
+            sigma_min: 0.01
+            num_scales: 1000
+          data:
+            channels: 2
+            image_size: 16
+            num_frames: 10
+            num_frames_cond: 10
+
 data:
   target: main.DataModuleFromConfig
   params:
