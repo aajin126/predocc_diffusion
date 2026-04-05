@@ -1485,7 +1485,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
             input_binary_maps = maps["input_binary_maps"]      # (B,T,1,H,W)
             mask_binary_maps = maps["mask_binary_maps"]        # (B,T,1,H,W)
-            input_occ_grid_map = maps["input_occ_grid_map"]    # (B,T,1,H,W)
+            input_occ_grid_map = maps["input_occ_grid_map"]    # (B,H,W)
+            input_occ_grid_map = input_occ_grid_map.reshape(-1, 1, IMG_SIZE, IMG_SIZE)
             x_rel = maps["x_rel"]                                  # (B,T)
             y_rel = maps["y_rel"]                                  # (B,T)
             th_rel = maps["th_rel"]                                # (B,T)
@@ -1498,7 +1499,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
             maps = preprocess_batch(batch, device=self.device)
             input_binary_maps = maps["input_binary_maps"]      # (B,T,1,H,W)
             mask_binary_maps = maps["mask_binary_maps"]        # (B,T,1,H,W)
-            input_occ_grid_map = maps["input_occ_grid_map"]    # (B,1,H,W)
+            input_occ_grid_map = maps["input_occ_grid_map"]    # (B,H,W)
             input_occ_grid_map = input_occ_grid_map.reshape(-1, 1, IMG_SIZE, IMG_SIZE)
 
             out = [input_binary_maps, mask_binary_maps, input_occ_grid_map]
