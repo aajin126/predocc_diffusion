@@ -39,8 +39,8 @@ MAP_X_LIMIT = [0, 6.4]      # Map limits on the x-axis
 MAP_Y_LIMIT = [-3.2, 3.2]   # Map limits on the y-axis
 RESOLUTION = 0.1        # Grid resolution in [m]'
 TRESHOLD_P_OCC = 0.8    # Occupancy threshold
-all_rows = []    
-csv_path = os.path.join("output", "ldm2.0_iou", "eval_table.csv")
+IOU_THRESHOLDS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+all_rows_by_thr = {occ_thr: [] for occ_thr in IOU_THRESHOLDS}
 
 def compute_iou(pred, gt, occ_thr=0.8):
     pred_occ = (pred > occ_thr)
@@ -72,24 +72,10 @@ def compute_miou(pred, gt, occ_thr=0.8):
 
     return miou
 
-
-def save_prediction_overlay_gif(prediction_maps, gt_binary, output_path, frame_duration_ms=100, scale=8):
+def save_prediction_overlay_gif(prediction_maps, gt_binary, output_path,
+                                frame_duration_ms=100, scale=8):
     """Save a GIF of predicted maps with GT occupied cells highlighted in red."""
     frames = []
-
-    if prediction_maps.dim() != 4:
-        raise ValueError(f"prediction_maps must have shape (T, 1, H, W), got {tuple(prediction_maps.shape)}")
-
-    if gt_binary.dim() == 3:
-        gt_binary = gt_binary.unsqueeze(1)
-    elif gt_binary.dim() != 4:
-        raise ValueError(f"gt_binary must have shape (T, H, W) or (T, 1, H, W), got {tuple(gt_binary.shape)}")
-
-    if prediction_maps.shape[0] != gt_binary.shape[0]:
-        raise ValueError(
-            f"prediction_maps and gt_binary must have the same number of frames, "
-            f"got {prediction_maps.shape[0]} and {gt_binary.shape[0]}"
-        )
 
     for frame_idx in range(prediction_maps.shape[0]):
         pred_map = prediction_maps[frame_idx, 0].detach().cpu().clamp(0, 1).numpy()
@@ -101,8 +87,10 @@ def save_prediction_overlay_gif(prediction_maps, gt_binary, output_path, frame_d
 
         pil_frame = Image.fromarray(rgb_frame, mode="RGB")
         if scale != 1:
-            width, height = pil_frame.size
-            pil_frame = pil_frame.resize((width * scale, height * scale), Image.Resampling.NEAREST)
+            pil_frame = pil_frame.resize(
+                (IMG_SIZE * scale, IMG_SIZE * scale),
+                Image.Resampling.NEAREST,
+            )
         frames.append(pil_frame)
 
     if frames:
@@ -113,6 +101,13 @@ def save_prediction_overlay_gif(prediction_maps, gt_binary, output_path, frame_d
             duration=frame_duration_ms,
             loop=0,
         )
+
+
+def save_iou_tables(all_rows_by_thr, output_dir):
+    for occ_thr, rows in all_rows_by_thr.items():
+        csv_path = os.path.join(output_dir, f"eval_table_iou_{occ_thr:.1f}.csv")
+        pd.DataFrame(rows).to_csv(csv_path, index=False)
+        print(f"Saved: {csv_path}")
 
 def load_ldm_model(ckpt_path, base_configs, unknown, device):
 
@@ -168,7 +163,7 @@ def load_ldm_model(ckpt_path, base_configs, unknown, device):
 
 @torch.no_grad()
 def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=10, ddim_eta=1.0, 
-                 occ_thr=0.8, save_images=True, num_batches=None, num_samples=1):
+                 occ_thr=0.1, save_images=True, num_batches=None, num_samples=1):
     """Evaluate LDM model on test/validation dataset"""
     
     os.makedirs(output_dir, exist_ok=True)
@@ -227,17 +222,21 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=10, ddim_eta=
             
             total_time_ms = (t1 - t0) * 1000
             
-            # Compute metrics per frame - average across all samples
-            row = {"i": batch_idx, "Inference_time": float(total_time_ms)}
-            
-            for t in range(SEQ_LEN):
-                gt_map = x_gt[0, t]  # (H, W)
-                pred_map = prediction_maps[t, 0]  # (H, W)
-                row[f"n={t+1}"] = float(compute_miou(pred_map, gt_map, occ_thr=occ_thr).item())
-            results.append(row)
+            for occ_thr in IOU_THRESHOLDS:
+                row = {
+                    "i": int(batch_idx),
+                    "Inference_time": float(total_time_ms),
+                    "occ_thr": float(occ_thr),
+                }
+                for n in range(SEQ_LEN):
+                    gt_map = x_gt[0, n]
+                    pred_map = prediction_maps[n]
+                    iou_value = float(compute_iou(pred_map, gt_map, occ_thr=occ_thr).item())
+                    row[f"n={n+1}"] = iou_value
+                all_rows_by_thr[occ_thr].append(row)
 
             if (batch_idx + 1) % 100 == 0:
-                pd.DataFrame(results).to_csv(csv_path, index=False)
+                save_iou_tables(all_rows_by_thr, output_dir)
 
             if save_images:
                 fontsize = 8
@@ -254,7 +253,7 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=10, ddim_eta=
                     plt.yticks([])
                     a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
                 img_path = os.path.join(output_dir, f"mask_{batch_idx}.png")
-                plt.savefig(img_path, dpi=300)
+                plt.savefig(img_path, dpi=500)
                 plt.close(fig)
 
                 # Predicted occupancy maps
@@ -269,18 +268,15 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=10, ddim_eta=
                     plt.yticks([])
                     a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
                 img_path = os.path.join(output_dir, f"pred{batch_idx}.png")
-                plt.savefig(img_path, dpi=300)
+                plt.savefig(img_path, dpi=500)
                 plt.close(fig)
 
                 gif_path = os.path.join(output_dir, f"overlay_{batch_idx}.gif")
                 save_prediction_overlay_gif(prediction_maps, x_gt[0], gif_path)
-    
-    df = pd.DataFrame(results)
-    df.to_csv(csv_path, index=False)
-    print(f"Saved: {csv_path}")
-   
-    
-    return df
+
+    save_iou_tables(all_rows_by_thr, output_dir)
+
+    return None
 
 def get_parser():
     parser = argparse.ArgumentParser()
