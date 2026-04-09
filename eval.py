@@ -20,6 +20,7 @@ from tqdm import tqdm
 from omegaconf import OmegaConf
 from torchvision.utils import make_grid
 from PIL import Image
+from skimage.metrics import structural_similarity as ssim
 from predocc.util import instantiate_from_config
 
 sys.path.append(os.path.join(os.getcwd(), 'predocc'))
@@ -41,6 +42,7 @@ RESOLUTION = 0.1        # Grid resolution in [m]'
 TRESHOLD_P_OCC = 0.8    # Occupancy threshold
 IOU_THRESHOLDS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
 all_rows_by_thr = {occ_thr: [] for occ_thr in IOU_THRESHOLDS}
+all_ssim_rows = []
 
 def compute_iou(pred, gt, occ_thr=0.8):
     pred_occ = (pred > occ_thr)
@@ -71,6 +73,24 @@ def compute_miou(pred, gt, occ_thr=0.8):
     miou = (iou_occ + iou_free) / 2.0
 
     return miou
+
+def compute_ssim_metric(pred, gt):
+    """Compute SSIM between prediction and ground truth.
+    
+    Args:
+        pred: prediction tensor (C, H, W)
+        gt: ground truth tensor (C, H, W)
+    
+    Returns:
+        ssim score (float)
+    """
+    pred_np = pred.detach().cpu().numpy().astype(np.float32)
+    gt_np = gt.detach().cpu().numpy().astype(np.float32)
+    
+    # Compute SSIM (data_range should be 1.0 for normalized values)
+    score = ssim(pred_np, gt_np, data_range=1.0, channel_axis=0)
+    
+    return float(score)
 
 def save_prediction_overlay_gif(prediction_maps, gt_binary, output_path,
                                 frame_duration_ms=100, scale=8):
@@ -107,6 +127,13 @@ def save_iou_tables(all_rows_by_thr, output_dir):
     for occ_thr, rows in all_rows_by_thr.items():
         csv_path = os.path.join(output_dir, f"eval_table_iou_{occ_thr:.1f}.csv")
         pd.DataFrame(rows).to_csv(csv_path, index=False)
+        print(f"Saved: {csv_path}")
+
+def save_ssim_table(all_ssim_rows, output_dir):
+    """Save SSIM metrics to CSV file."""
+    if all_ssim_rows:
+        csv_path = os.path.join(output_dir, "eval_table_ssim.csv")
+        pd.DataFrame(all_ssim_rows).to_csv(csv_path, index=False)
         print(f"Saved: {csv_path}")
 
 def load_ldm_model(ckpt_path, base_configs, unknown, device):
@@ -163,7 +190,7 @@ def load_ldm_model(ckpt_path, base_configs, unknown, device):
 
 @torch.no_grad()
 def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=10, ddim_eta=1.0, 
-                 occ_thr=0.1, save_images=True, num_batches=None, num_samples=1):
+                 occ_thr=0.1, save_images=False, num_batches=None, num_samples=1):
     """Evaluate LDM model on test/validation dataset"""
     
     os.makedirs(output_dir, exist_ok=True)
@@ -222,6 +249,17 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=10, ddim_eta=
             
             total_time_ms = (t1 - t0) * 1000
             
+            # Compute SSIM metrics
+            ssim_row = {
+                "i": int(batch_idx),
+            }
+            for n in range(SEQ_LEN):
+                gt_map = x_gt[0, n]
+                pred_map = prediction_maps[n]
+                ssim_value = compute_ssim_metric(pred_map, gt_map)
+                ssim_row[f"n={n+1}"] = ssim_value
+            all_ssim_rows.append(ssim_row)
+            
             for occ_thr in IOU_THRESHOLDS:
                 row = {
                     "i": int(batch_idx),
@@ -236,45 +274,47 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=10, ddim_eta=
                 all_rows_by_thr[occ_thr].append(row)
 
             if (batch_idx + 1) % 100 == 0:
-                save_iou_tables(all_rows_by_thr, output_dir)
+                #save_iou_tables(all_rows_by_thr, output_dir)
+                save_ssim_table(all_ssim_rows, output_dir)
 
             if save_images:
                 fontsize = 8
 
-                # GT occupancy maps
-                fig = plt.figure(figsize=(8, 1))
-                for m in range(SEQ_LEN):
-                    a = fig.add_subplot(1, SEQ_LEN, m + 1)
-                    mask = x_gt[0, m]
-                    input_grid = make_grid(mask.detach().cpu())
-                    input_image = input_grid.permute(1, 2, 0)
-                    plt.imshow(input_image)
-                    plt.xticks([])
-                    plt.yticks([])
-                    a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
-                img_path = os.path.join(output_dir, f"mask_{batch_idx}.png")
-                plt.savefig(img_path, dpi=500)
-                plt.close(fig)
+                # # GT occupancy maps
+                # fig = plt.figure(figsize=(8, 1))
+                # for m in range(SEQ_LEN):
+                #     a = fig.add_subplot(1, SEQ_LEN, m + 1)
+                #     mask = x_gt[0, m]
+                #     input_grid = make_grid(mask.detach().cpu())
+                #     input_image = input_grid.permute(1, 2, 0)
+                #     plt.imshow(input_image)
+                #     plt.xticks([])
+                #     plt.yticks([])
+                #     a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
+                # img_path = os.path.join(output_dir, f"mask_{batch_idx}.png")
+                # plt.savefig(img_path, dpi=500)
+                # plt.close(fig)
 
-                # Predicted occupancy maps
-                fig = plt.figure(figsize=(8, 1))
-                for m in range(SEQ_LEN):
-                    a = fig.add_subplot(1, SEQ_LEN, m + 1)
-                    pred = prediction_maps[m]
-                    input_grid = make_grid(pred.detach().cpu())
-                    input_image = input_grid.permute(1, 2, 0)
-                    plt.imshow(input_image)
-                    plt.xticks([])
-                    plt.yticks([])
-                    a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
-                img_path = os.path.join(output_dir, f"pred{batch_idx}.png")
-                plt.savefig(img_path, dpi=500)
-                plt.close(fig)
+                # # Predicted occupancy maps
+                # fig = plt.figure(figsize=(8, 1))
+                # for m in range(SEQ_LEN):
+                #     a = fig.add_subplot(1, SEQ_LEN, m + 1)
+                #     pred = prediction_maps[m]
+                #     input_grid = make_grid(pred.detach().cpu())
+                #     input_image = input_grid.permute(1, 2, 0)
+                #     plt.imshow(input_image)
+                #     plt.xticks([])
+                #     plt.yticks([])
+                #     a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
+                # img_path = os.path.join(output_dir, f"pred{batch_idx}.png")
+                # plt.savefig(img_path, dpi=500)
+                # plt.close(fig)
 
-                gif_path = os.path.join(output_dir, f"overlay_{batch_idx}.gif")
-                save_prediction_overlay_gif(prediction_maps, x_gt[0], gif_path)
+                # gif_path = os.path.join(output_dir, f"overlay_{batch_idx}.gif")
+                # save_prediction_overlay_gif(prediction_maps, x_gt[0], gif_path)
 
-    save_iou_tables(all_rows_by_thr, output_dir)
+    #save_iou_tables(all_rows_by_thr, output_dir)
+    save_ssim_table(all_ssim_rows, output_dir)
 
     return None
 
