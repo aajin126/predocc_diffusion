@@ -1431,6 +1431,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
         cond_stage_config,
         first_stage_ckpt_path=None,
         convlstm_hidden_dim = 32,
+        recon_start_step=20000,     # before this: diffusion loss only
+        recon_ramp_steps=10000,     # ramp lambda_recon from 0 to max_lambda_recon
+        max_lambda_recon=1.0,       # max weight for BCE recon loss
         *args,**kwargs,):
         super().__init__(
             first_stage_config=first_stage_config,
@@ -1441,6 +1444,11 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         self.convlstm_hidden_dim = convlstm_hidden_dim
         self.first_stage_ckpt_path = first_stage_ckpt_path
+        
+        self.recon_start_step = recon_start_step
+        self.recon_ramp_steps = recon_ramp_steps
+        self.max_lambda_recon = max_lambda_recon
+
         ignore_keys = kwargs.pop("ignore_keys", [])
 
         if self.first_stage_ckpt_path is not None:
@@ -1597,13 +1605,14 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         return self.first_stage_model.decode(z)
 
-    def forward(self, x, c, *args, **kwargs):
+    def forward(self, x, c, gt_future=None,*args, **kwargs):
         """
         x: (B *T, C_lat, H_lat, W_lat)
         c: (B *T, C_cond, H_lat, W_lat)
+        gt_future: (B*T, C, H, W)
         """
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
-        return self.p_losses(x, c, t, *args, **kwargs)
+        return self.p_losses(x, c, t, gt_future=gt_future,*args, **kwargs)
 
     def shared_step(self, batch, **kwargs):
         
@@ -1613,7 +1622,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         cond = cond.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (B*T, 32, 16, 16)
 
-        loss = self(z, cond) # forward
+        gt_future = mask_binary_maps.reshape(-1, 1, IMG_SIZE, IMG_SIZE).float()
+
+        loss = self(z, cond, gt_future=gt_future) # forward
 
         return loss
 
@@ -1643,10 +1654,11 @@ class PredOccLatentDiffusion(LatentDiffusion):
         self.log_dict(loss_dict_no_ema, prog_bar=False, logger=True, on_step=False, on_epoch=True)
         self.log_dict(loss_dict_ema, prog_bar=False, logger=True, on_step=False, on_epoch=True)
 
-    def p_losses(self, x_start, cond, t, noise=None):
+    def p_losses(self, x_start, cond, t, noise=None, gt_future=None):
         """
         x_start: (B, C_lat, H_lat, W_lat)
         cond:    (B, C_cond, H_lat, W_lat)
+        gt_future: (B*T, C, H, W)
         """
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
@@ -1657,11 +1669,16 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         if self.parameterization == "x0":
             target = x_start
+            x0_pred = model_output
         elif self.parameterization == "eps":
             target = noise
+            x0_pred = self.predict_start_from_noise(x_noisy, t=t, noise=model_output)
         else:
             raise NotImplementedError()
 
+        # -----------------------------
+        # 1) original diffusion loss
+        # -----------------------------
         loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3])
         loss_dict.update({f"{prefix}/loss_simple": loss_simple.mean()})
 
@@ -1679,9 +1696,44 @@ class PredOccLatentDiffusion(LatentDiffusion):
         loss_dict.update({f'{prefix}/loss_vlb': loss_vlb})
 
         loss += (self.original_elbo_weight * loss_vlb)
-        loss_dict.update({f'{prefix}/loss': loss})
-        
-        return loss, loss_dict
+        # -----------------------------
+        # 2) BCE recon loss with warmup/ramp
+        # -----------------------------
+        recon_loss = torch.tensor(0.0, device=x_start.device)
+        lambda_recon = 0.0
+
+        if gt_future is not None:
+            current_step = int(self.global_step)
+
+            if current_step >= self.recon_start_step:
+                if self.recon_ramp_steps > 0:
+                    progress = min(
+                        1.0,
+                        (current_step - self.recon_start_step) / float(self.recon_ramp_steps)
+                    )
+                else:
+                    progress = 1.0
+                
+                T = self.first_stage_model.seq_len
+                B = gt_future.shape[0] // T
+                H, W = gt_future.shape[-2], gt_future.shape[-1]
+                
+                lambda_recon = self.max_lambda_recon * progress
+
+                # latent x0 prediction -> differentiable decode
+                x0_rec = self.differentiable_decode_first_stage(x0_pred)
+                gt_future_bin = gt_future.float()
+
+                recon_loss = F.binary_cross_entropy(x0_rec, gt_future_bin, reduction="sum")/ (B * T * H * W)
+
+        total_loss = loss + lambda_recon * recon_loss
+
+        loss_dict.update({f"{prefix}/loss_recon": recon_loss})
+        loss_dict.update({f"{prefix}/lambda_recon": torch.tensor(lambda_recon, device=x_start.device)})
+        loss_dict.update({f"{prefix}/loss_diffusion": loss})
+        loss_dict.update({f"{prefix}/loss": total_loss})
+
+        return total_loss, loss_dict
 
     @staticmethod
     def compute_iou(pred, gt, occ_thr=0.3):
