@@ -39,8 +39,8 @@ MAP_X_LIMIT = [0, 6.4]      # Map limits on the x-axis
 MAP_Y_LIMIT = [-3.2, 3.2]   # Map limits on the y-axis
 RESOLUTION = 0.1        # Grid resolution in [m]'
 TRESHOLD_P_OCC = 0.8    # Occupancy threshold
-all_rows = []    
-csv_path = os.path.join("output", "ldm2.2", "eval_table.csv")
+IOU_THRESHOLDS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+all_rows_by_thr = {occ_thr: [] for occ_thr in IOU_THRESHOLDS}
 
 def compute_iou(pred, gt, occ_thr=0.3):
     pred_occ = (pred > occ_thr)
@@ -52,6 +52,44 @@ def compute_iou(pred, gt, occ_thr=0.3):
     iou = inter / (union + 1e-6)
 
     return iou
+
+def save_prediction_overlay_gif(prediction_maps, gt_binary, output_path,
+                                frame_duration_ms=100, scale=8):
+    """Save a GIF of predicted maps with GT occupied cells highlighted in red."""
+    frames = []
+
+    for frame_idx in range(prediction_maps.shape[0]):
+        pred_map = prediction_maps[frame_idx, 0].detach().cpu().clamp(0, 1).numpy()
+        gt_map = gt_binary[frame_idx, 0].detach().cpu().numpy() > 0.5
+
+        pred_uint8 = (pred_map * 255).astype(np.uint8)
+        rgb_frame = np.stack([pred_uint8, pred_uint8, pred_uint8], axis=-1)
+        rgb_frame[gt_map] = np.array([255, 0, 0], dtype=np.uint8)
+
+        pil_frame = Image.fromarray(rgb_frame, mode="RGB")
+        if scale != 1:
+            pil_frame = pil_frame.resize(
+                (IMG_SIZE * scale, IMG_SIZE * scale),
+                Image.Resampling.NEAREST,
+            )
+        frames.append(pil_frame)
+
+    if frames:
+        frames[0].save(
+            output_path,
+            save_all=True,
+            append_images=frames[1:],
+            duration=frame_duration_ms,
+            loop=0,
+        )
+
+
+def save_iou_tables(all_rows_by_thr, output_dir):
+    for occ_thr, rows in all_rows_by_thr.items():
+        csv_path = os.path.join(output_dir, f"eval_table_iou_{occ_thr:.1f}.csv")
+        pd.DataFrame(rows).to_csv(csv_path, index=False)
+        print(f"Saved: {csv_path}")
+
 
 def load_ldm_model(ckpt_path, base_configs, unknown, device):
 
@@ -171,17 +209,22 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
             
             total_time_ms = (t1 - t0) * 1000
             
-            # Compute metrics per frame - average across all samples
-            row = {"i": batch_idx, "Inference_time": float(total_time_ms)}
-            
-            for t in range(SEQ_LEN):
-                gt_map = x_gt[0, t]  # (H, W)
-                pred_map = prediction_maps[t, 0]  # (H, W)
-                row[f"n={t+1}"] = float(compute_iou(pred_map, gt_map, occ_thr=occ_thr).item())
-            results.append(row)
+            for occ_thr in IOU_THRESHOLDS:
+                row = {
+                    "i": int(batch_idx),
+                    "Inference_time": float(total_time_ms),
+                    "occ_thr": float(occ_thr),
+                }
+                for n in range(SEQ_LEN):
+                    gt_map = x_gt[0, n]
+                    pred_map = prediction_maps[n]
+                    iou_value = float(compute_iou(pred_map, gt_map, occ_thr=occ_thr).item())
+                    row[f"n={n+1}"] = iou_value
+                all_rows_by_thr[occ_thr].append(row)
 
             if (batch_idx + 1) % 100 == 0:
-                pd.DataFrame(results).to_csv(csv_path, index=False)
+                save_iou_tables(all_rows_by_thr, output_dir)
+
             
             # GT occupancy maps
             fig = plt.figure(figsize=(8, 1))
@@ -213,13 +256,15 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=20, ddim_eta=
             img_path = os.path.join(output_dir, f"pred{batch_idx}.png")
             plt.savefig(img_path, dpi=300)
             plt.close(fig)
-    
-    df = pd.DataFrame(results)
-    df.to_csv(csv_path, index=False)
-    print(f"Saved: {csv_path}")
-   
-    
-    return df
+
+            overlay_gif_name = os.path.join(output_dir, "pred_gif" + str(batch_idx) + ".gif")
+            save_prediction_overlay_gif(prediction_maps, x_gt[0], overlay_gif_name)
+
+            print(batch_idx)
+
+    save_iou_tables(all_rows_by_thr, output_dir)
+
+    return None
 
 def get_parser():
     parser = argparse.ArgumentParser()
