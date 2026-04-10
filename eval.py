@@ -21,6 +21,8 @@ from omegaconf import OmegaConf
 from torchvision.utils import make_grid
 from PIL import Image
 from skimage.metrics import structural_similarity as ssim
+from skimage.metrics import peak_signal_noise_ratio as psnr
+from skimage.metrics import normalized_mutual_information as nmi
 from predocc.util import instantiate_from_config
 
 sys.path.append(os.path.join(os.getcwd(), 'predocc'))
@@ -43,6 +45,8 @@ TRESHOLD_P_OCC = 0.8    # Occupancy threshold
 IOU_THRESHOLDS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
 all_rows_by_thr = {occ_thr: [] for occ_thr in IOU_THRESHOLDS}
 all_ssim_rows = []
+all_psnr_rows = []
+all_nmi_rows = []
 
 def compute_iou(pred, gt, occ_thr=0.8):
     pred_occ = (pred > occ_thr)
@@ -92,6 +96,44 @@ def compute_ssim_metric(pred, gt):
     
     return float(score)
 
+
+def compute_psnr_metric(pred, gt):
+    """Compute PSNR between prediction and ground truth.
+    
+    Args:
+        pred: prediction tensor (C, H, W)
+        gt: ground truth tensor (C, H, W)
+    
+    Returns:
+        psnr score (float)
+    """
+    pred_np = pred.detach().cpu().numpy().astype(np.float32)
+    gt_np = gt.detach().cpu().numpy().astype(np.float32)
+    
+    # Compute PSNR (data_range should be 1.0 for normalized values)
+    score = psnr(gt_np, pred_np, data_range=1.0)
+    
+    return float(score)
+
+
+def compute_nmi_metric(pred, gt):
+    """Compute NMI between prediction and ground truth.
+    
+    Args:
+        pred: prediction tensor (C, H, W)
+        gt: ground truth tensor (C, H, W)
+    
+    Returns:
+        nmi score (float)
+    """
+    pred_np = pred.detach().cpu().numpy().astype(np.float32)
+    gt_np = gt.detach().cpu().numpy().astype(np.float32)
+    
+    # Compute NMI
+    score = nmi(gt_np, pred_np)
+    
+    return float(score)
+
 def save_prediction_overlay_gif(prediction_maps, gt_binary, output_path,
                                 frame_duration_ms=100, scale=8):
     """Save a GIF of predicted maps with GT occupied cells highlighted in red."""
@@ -135,6 +177,21 @@ def save_ssim_table(all_ssim_rows, output_dir):
         csv_path = os.path.join(output_dir, "eval_table_ssim.csv")
         pd.DataFrame(all_ssim_rows).to_csv(csv_path, index=False)
         print(f"Saved: {csv_path}")
+
+def save_psnr_table(all_psnr_rows, output_dir):
+    """Save PSNR metrics to CSV file."""
+    if all_psnr_rows:
+        csv_path = os.path.join(output_dir, "eval_table_psnr.csv")
+        pd.DataFrame(all_psnr_rows).to_csv(csv_path, index=False)
+        print(f"Saved: {csv_path}")
+
+def save_nmi_table(all_nmi_rows, output_dir):
+    """Save NMI metrics to CSV file."""
+    if all_nmi_rows:
+        csv_path = os.path.join(output_dir, "eval_table_nmi.csv")
+        pd.DataFrame(all_nmi_rows).to_csv(csv_path, index=False)
+        print(f"Saved: {csv_path}")
+
 
 def load_ldm_model(ckpt_path, base_configs, unknown, device):
 
@@ -259,7 +316,27 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=10, ddim_eta=
                 ssim_value = compute_ssim_metric(pred_map, gt_map)
                 ssim_row[f"n={n+1}"] = ssim_value
             all_ssim_rows.append(ssim_row)
-            
+
+            psnr_row = {
+                "i": int(i),
+            }
+            for n in range(SEQ_LEN):
+                gt_map = x_gt[0, n]
+                pred_map = prediction_maps[n]
+                psnr_value = compute_psnr_metric(pred_map, gt_map)
+                psnr_row[f"n={n+1}"] = psnr_value
+            all_psnr_rows.append(psnr_row)
+
+            nmi_row = {
+                "i": int(i),
+            }
+            for n in range(SEQ_LEN):
+                gt_map = x_gt[0, n]
+                pred_map = prediction_maps[n]
+                nmi_value = compute_nmi_metric(pred_map, gt_map)
+                nmi_row[f"n={n+1}"] = nmi_value
+            all_nmi_rows.append(nmi_row)
+
             for occ_thr in IOU_THRESHOLDS:
                 row = {
                     "i": int(batch_idx),
@@ -274,47 +351,51 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=10, ddim_eta=
                 all_rows_by_thr[occ_thr].append(row)
 
             if (batch_idx + 1) % 100 == 0:
-                #save_iou_tables(all_rows_by_thr, output_dir)
+                save_iou_tables(all_rows_by_thr, output_dir)
                 save_ssim_table(all_ssim_rows, output_dir)
+                save_psnr_table(all_psnr_rows, output_dir)
+                save_nmi_table(all_nmi_rows, output_dir)
 
             if save_images:
                 fontsize = 8
 
-                # # GT occupancy maps
-                # fig = plt.figure(figsize=(8, 1))
-                # for m in range(SEQ_LEN):
-                #     a = fig.add_subplot(1, SEQ_LEN, m + 1)
-                #     mask = x_gt[0, m]
-                #     input_grid = make_grid(mask.detach().cpu())
-                #     input_image = input_grid.permute(1, 2, 0)
-                #     plt.imshow(input_image)
-                #     plt.xticks([])
-                #     plt.yticks([])
-                #     a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
-                # img_path = os.path.join(output_dir, f"mask_{batch_idx}.png")
-                # plt.savefig(img_path, dpi=500)
-                # plt.close(fig)
+                # GT occupancy maps
+                fig = plt.figure(figsize=(8, 1))
+                for m in range(SEQ_LEN):
+                    a = fig.add_subplot(1, SEQ_LEN, m + 1)
+                    mask = x_gt[0, m]
+                    input_grid = make_grid(mask.detach().cpu())
+                    input_image = input_grid.permute(1, 2, 0)
+                    plt.imshow(input_image)
+                    plt.xticks([])
+                    plt.yticks([])
+                    a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
+                img_path = os.path.join(output_dir, f"mask_{batch_idx}.png")
+                plt.savefig(img_path, dpi=500)
+                plt.close(fig)
 
-                # # Predicted occupancy maps
-                # fig = plt.figure(figsize=(8, 1))
-                # for m in range(SEQ_LEN):
-                #     a = fig.add_subplot(1, SEQ_LEN, m + 1)
-                #     pred = prediction_maps[m]
-                #     input_grid = make_grid(pred.detach().cpu())
-                #     input_image = input_grid.permute(1, 2, 0)
-                #     plt.imshow(input_image)
-                #     plt.xticks([])
-                #     plt.yticks([])
-                #     a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
-                # img_path = os.path.join(output_dir, f"pred{batch_idx}.png")
-                # plt.savefig(img_path, dpi=500)
-                # plt.close(fig)
+                # Predicted occupancy maps
+                fig = plt.figure(figsize=(8, 1))
+                for m in range(SEQ_LEN):
+                    a = fig.add_subplot(1, SEQ_LEN, m + 1)
+                    pred = prediction_maps[m]
+                    input_grid = make_grid(pred.detach().cpu())
+                    input_image = input_grid.permute(1, 2, 0)
+                    plt.imshow(input_image)
+                    plt.xticks([])
+                    plt.yticks([])
+                    a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
+                img_path = os.path.join(output_dir, f"pred{batch_idx}.png")
+                plt.savefig(img_path, dpi=500)
+                plt.close(fig)
 
-                # gif_path = os.path.join(output_dir, f"overlay_{batch_idx}.gif")
-                # save_prediction_overlay_gif(prediction_maps, x_gt[0], gif_path)
+                gif_path = os.path.join(output_dir, f"overlay_{batch_idx}.gif")
+                save_prediction_overlay_gif(prediction_maps, x_gt[0], gif_path)
 
-    #save_iou_tables(all_rows_by_thr, output_dir)
+    save_iou_tables(all_rows_by_thr, output_dir)
     save_ssim_table(all_ssim_rows, output_dir)
+    save_psnr_table(all_psnr_rows, output_dir)
+    save_nmi_table(all_nmi_rows, output_dir)
 
     return None
 
