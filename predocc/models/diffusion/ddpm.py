@@ -1327,6 +1327,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
         cond_stage_config,
         first_stage_ckpt_path=None,
         convlstm_hidden_dim = 32,
+        suffix_windows=(10, 7, 5, 3),
+        gate_tau=0.5,
         *args,**kwargs,):
         super().__init__(
             first_stage_config=first_stage_config,
@@ -1337,7 +1339,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         self.convlstm_hidden_dim = convlstm_hidden_dim
         self.first_stage_ckpt_path = first_stage_ckpt_path
-        ignore_keys = kwargs.pop("ignore_keys", [])
+        self.suffix_windows = tuple(suffix_windows)
+        self.gate_tau = gate_tau
 
         if self.first_stage_ckpt_path is not None:
             self.load_first_stage(self.first_stage_ckpt_path)
@@ -1361,6 +1364,15 @@ class PredOccLatentDiffusion(LatentDiffusion):
             out_channels=self.convlstm_hidden_dim,  # 32
             kernel_size=1,
             stride=1,
+        )
+
+        num_experts = len(self.suffix_windows)
+
+        # gate input = concatenated GAP vectors from each projected cond
+        self.gate_mlp = nn.Sequential(
+            nn.Linear(self.convlstm_hidden_dim * num_experts, 128),
+            nn.SiLU(),
+            nn.Linear(128, num_experts),
         )
 
     def get_input(
@@ -1444,40 +1456,95 @@ class PredOccLatentDiffusion(LatentDiffusion):
             raise NotImplementedError(f"encoder_posterior of type '{type(encoder_posterior)}' not yet implemented")
         return self.scale_factor * z
 
-    def get_encoding(self, input_binary_maps, mask_binary_maps=None, input_occ_grid_map=None):
+    def _run_convlstm_suffix(self, seq):
         """
-        Encoding for PredOcc Diffusion with frame-wise Autoencoder:
-        - input_binary_maps: past sequence (B, T, 1, H, W)
-        - mask_binary_maps: future sequence (B, T, 1, H, W)
-        - Returns: [cond, z]
-          - cond: conditioning from past via ConvLSTM (B, 32, 16, 16)
-          - z: future latent via frame-wise AE (B*T, embed_dim, 16, 16)
+        seq: (B, T, 1, H, W)
+        returns last hidden state: (B, hidden_dim, H, W)
         """
-        b, seq_len, c , h, w = input_binary_maps.shape
-        
-        # 1) Conditioning: ConvLSTM on past sequence
+        b, t, _, h, w = seq.shape
         h_enc, c_enc = self.convlstm_cell.init_hidden(batch_size=b, image_size=(h, w))
-        for t in range(seq_len):
+        for ti in range(t):
             h_enc, c_enc = self.convlstm_cell(
-                input_tensor=input_binary_maps[:, t],
+                input_tensor=seq[:, ti],
                 cur_state=[h_enc, c_enc]
             )
-        # h_enc : (B, 32, 64, 64)
-        
-        # h_enc + x_map conditioning
-        cond_in = torch.cat([h_enc, input_occ_grid_map], dim=1)   # (B,33,64,64)
-        cond_feat = self.cond_encoder(cond_in)       # (B, 128, 16, 16)
-        cond = self.cond_proj(cond_feat)           # (B, 32, 16, 16)
+        return h_enc
 
+    def _build_cond_from_hidden(self, h_enc, input_occ_grid_map):
+        """
+        h_enc: (B, hidden_dim, H, W)
+        input_occ_grid_map: (B, 1, H, W)
+        returns cond: (B, 32, 16, 16)
+        """
+        cond_in = torch.cat([h_enc, input_occ_grid_map], dim=1)   # (B, 32, H, W)
+        cond_feat = self.cond_encoder(cond_in)                    # (B, 128, 16, 16)
+        cond = self.cond_proj(cond_feat)                          # (B, 32, 16, 16)
+        return cond
+
+    def _select_cond_from_past(self, input_binary_maps, input_occ_grid_map):
+        """
+        input_binary_maps: (B, T, 1, H, W)
+        input_occ_grid_map: (B, 1, H, W)
+
+        returns:
+            cond_sel: (B, 32, 16, 16)
+            alpha:    (B, K)
+            cond_list: list of K tensors, each (B, 32, 16, 16)
+        """
+        b, seq_len, _, _, _ = input_binary_maps.shape
+
+        valid_windows = [w for w in self.suffix_windows if w <= seq_len]
+        assert len(valid_windows) > 0, "No valid suffix window found."
+
+        cond_list = []
+        gate_vecs = []
+
+        for w in valid_windows:
+            suffix_seq = input_binary_maps[:, -w:]                # (B, w, 1, H, W)
+            h_last = self._run_convlstm_suffix(suffix_seq)        # (B, hidden_dim, H, W)
+            cond_w = self._build_cond_from_hidden(h_last, input_occ_grid_map)  # (B, 32, 16, 16)
+            cond_list.append(cond_w)
+            gate_vecs.append(cond_w.mean(dim=(2, 3)))             # GAP -> (B, 32)
+
+        gate_in = torch.cat(gate_vecs, dim=1)                     # (B, 32*K)
+        scores = self.gate_mlp(gate_in)                           # (B, K)
+
+        alpha = torch.nn.functional.gumbel_softmax(
+            scores, tau=self.gate_tau, hard=True, dim=1
+        )                                                         # (B, K)
+
+        cond_sel = 0.0
+        for i, cond_w in enumerate(cond_list):
+            cond_sel = cond_sel + alpha[:, i].view(b, 1, 1, 1) * cond_w
+
+        return cond_sel, alpha, cond_list
+
+    def get_encoding(self, input_binary_maps, mask_binary_maps=None, input_occ_grid_map=None):
+        """
+        input_binary_maps: (B, T, 1, H, W)
+        mask_binary_maps:  (B, T, 1, H, W)
+
+        returns:
+            cond:       (B, 32, 16, 16)
+            z:          (B*T, C_lat, 16, 16) or None
+            gate_alpha: (B, K)
+        """
+        b, seq_len, _, h, w = input_binary_maps.shape
+
+        # 1) hard-gated temporal condition from suffix windows
+        cond, gate_alpha, _ = self._select_cond_from_past(
+            input_binary_maps=input_binary_maps,
+            input_occ_grid_map=input_occ_grid_map,
+        )
         # 2) Future sequence -> frame-wise latent
         z = None
         if mask_binary_maps is not None:
             with torch.no_grad():
-                # Frame-wise encode: (B, T, 1, H, W) -> (B, T*embed_dim, 16, 16)
+                # Frame-wise encode: (B, T, 1, H, W) -> (B*T, embed_dim, 16, 16)
                 encoder_posterior = self.first_stage_model.encode(mask_binary_maps)
-                z = self.get_first_stage_encoding(encoder_posterior)  # (B, T*embed_dim, 16, 16)
+                z = self.get_first_stage_encoding(encoder_posterior)  # (B*T, embed_dim, 16, 16)
 
-        out = [cond, z]
+        out = [cond, z, gate_alpha]
         
         return out
 
@@ -1505,13 +1572,20 @@ class PredOccLatentDiffusion(LatentDiffusion):
         
         input_binary_maps, mask_binary_maps, input_occ_grid_map = self.get_input(batch)
         
-        cond, z = self.get_encoding(input_binary_maps, mask_binary_maps, input_occ_grid_map)
+        cond, z, gate_alpha = self.get_encoding(
+            input_binary_maps, mask_binary_maps, input_occ_grid_map
+        )
 
         cond = cond.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (B*T, 32, 16, 16)
 
-        loss = self(z, cond) # forward
+        loss, loss_dict = self(z, cond)
 
-        return loss
+        # gate usage logging
+        prefix = 'train' if self.training else 'val'
+        for i, w in enumerate([w for w in self.suffix_windows if w <= input_binary_maps.shape[1]]):
+            loss_dict[f"{prefix}/gate_w{w}"] = gate_alpha[:, i].float().mean()
+
+        return loss, loss_dict
 
 		# same as ddpm
     def training_step(self, batch, batch_idx):
@@ -1560,7 +1634,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3])
         loss_dict.update({f'{prefix}/loss_simple': loss_simple.mean()})
 
-        logvar_t = self.logvar[t.cpu()].to(self.device)
+        logvar_t = self.logvar[t].to(self.device)
         loss = loss_simple / torch.exp(logvar_t) + logvar_t
 
         if self.learn_logvar:
@@ -1570,7 +1644,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         loss = self.l_simple_weight * loss.mean()
 
         loss_vlb = self.get_loss(model_output, target, mean=False).mean(dim=(1, 2, 3))
-        loss_vlb = (self.lvlb_weights[t.cpu()] * loss_vlb).mean()
+        loss_vlb = (self.lvlb_weights[t] * loss_vlb).mean()
         loss_dict.update({f'{prefix}/loss_vlb': loss_vlb})
         loss += (self.original_elbo_weight * loss_vlb)
         loss_dict.update({f'{prefix}/loss': loss})
@@ -1609,7 +1683,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         x_occ = x_occ[:B_vis]
 
         t0 = time.perf_counter()
-        c, _ = self.get_encoding(x_in, x_gt, x_occ)
+        c, _, gate_alpha = self.get_encoding(x_in, x_gt, x_occ)
 
         # 1) duplicate condition
         c = c.repeat_interleave(K, dim=0)             # (B_vis*K, C, H, W)
@@ -1686,7 +1760,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
             list(self.model.parameters()) +
             list(self.convlstm_cell.parameters()) +
             list(self.cond_encoder.parameters()) + 
-            list(self.cond_proj.parameters())
+            list(self.cond_proj.parameters()) +
+            list(self.gate_mlp.parameters())
         )
 
 
