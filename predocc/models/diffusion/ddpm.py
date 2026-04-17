@@ -1328,7 +1328,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
         first_stage_ckpt_path=None,
         convlstm_hidden_dim = 32,
         suffix_windows=(10, 7, 5, 3),
-        gate_tau=0.5,
+        gate_tau=1.0,
+        gate_entropy_weight=1e-3,
         *args,**kwargs,):
         super().__init__(
             first_stage_config=first_stage_config,
@@ -1341,6 +1342,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         self.first_stage_ckpt_path = first_stage_ckpt_path
         self.suffix_windows = tuple(suffix_windows)
         self.gate_tau = gate_tau
+        self.gate_entropy_weight = gate_entropy_weight
 
         if self.first_stage_ckpt_path is not None:
             self.load_first_stage(self.first_stage_ckpt_path)
@@ -1513,11 +1515,14 @@ class PredOccLatentDiffusion(LatentDiffusion):
             scores, tau=self.gate_tau, hard=True, dim=1
         )                                                         # (B, K)
 
+        gate_probs = torch.softmax(scores / self.gate_tau, dim=1)   # (B, K)
+        gate_entropy = -(gate_probs * torch.log(gate_probs + 1e-8)).sum(dim=1).mean()
+
         cond_sel = 0.0
         for i, cond_w in enumerate(cond_list):
             cond_sel = cond_sel + alpha[:, i].view(b, 1, 1, 1) * cond_w
 
-        return cond_sel, alpha, cond_list
+        return cond_sel, alpha, cond_list, gate_entropy, gate_probs
 
     def get_encoding(self, input_binary_maps, mask_binary_maps=None, input_occ_grid_map=None):
         """
@@ -1532,7 +1537,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         b, seq_len, _, h, w = input_binary_maps.shape
 
         # 1) hard-gated temporal condition from suffix windows
-        cond, gate_alpha, _ = self._select_cond_from_past(
+        cond, gate_alpha, _ , gate_entropy, gate_probs = self._select_cond_from_past(
             input_binary_maps=input_binary_maps,
             input_occ_grid_map=input_occ_grid_map,
         )
@@ -1544,7 +1549,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
                 encoder_posterior = self.first_stage_model.encode(mask_binary_maps)
                 z = self.get_first_stage_encoding(encoder_posterior)  # (B*T, embed_dim, 16, 16)
 
-        out = [cond, z, gate_alpha]
+        out = [cond, z, gate_alpha, gate_entropy, gate_probs]
         
         return out
 
@@ -1572,7 +1577,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         
         input_binary_maps, mask_binary_maps, input_occ_grid_map = self.get_input(batch)
         
-        cond, z, gate_alpha = self.get_encoding(
+        cond, z, gate_alpha, gate_entropy, gate_probs = self.get_encoding(
             input_binary_maps, mask_binary_maps, input_occ_grid_map
         )
 
@@ -1580,10 +1585,23 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         loss, loss_dict = self(z, cond)
 
-        # gate usage logging
         prefix = 'train' if self.training else 'val'
-        for i, w in enumerate([w for w in self.suffix_windows if w <= input_binary_maps.shape[1]]):
+        valid_windows = [w for w in self.suffix_windows if w <= input_binary_maps.shape[1]]
+
+        # gate usage logging
+        for i, w in enumerate(valid_windows):
             loss_dict[f"{prefix}/gate_w{w}"] = gate_alpha[:, i].float().mean()
+            loss_dict[f"{prefix}/gate_prob_w{w}"] = gate_probs[:, i].float().mean()
+
+        # entropy logging
+        loss_dict[f"{prefix}/gate_entropy"] = gate_entropy
+        loss_dict[f"{prefix}/gate_tau"] = torch.tensor(self.gate_tau, device=self.device)
+
+        # entropy regularization
+        # loss_total = diffusion_loss - lambda * gate_entropy
+        loss = loss - self.gate_entropy_weight * gate_entropy
+
+        loss_dict[f"{prefix}/loss_total"] = loss
 
         return loss, loss_dict
 
