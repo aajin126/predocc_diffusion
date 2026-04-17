@@ -1444,11 +1444,18 @@ class PredOccLatentDiffusion(LatentDiffusion):
             raise NotImplementedError(f"encoder_posterior of type '{type(encoder_posterior)}' not yet implemented")
         return self.scale_factor * z
 
+
+    def build_sequence_mask(self, batch_size, t_past, h_lat, w_lat, t_future, device):
+        m_past = torch.ones(batch_size, t_past, 1, h_lat, w_lat, device=device)
+        m_future = torch.zeros(batch_size, t_future, 1, h_lat, w_lat, device=device)
+        return torch.cat([m_past, m_future], dim=1)
+
     def get_encoding(self, input_binary_maps, mask_binary_maps=None, input_occ_grid_map=None):
         """
         Encoding for PredOcc Diffusion with frame-wise Autoencoder:
         - input_binary_maps: past sequence (B, T, 1, H, W)
         - mask_binary_maps: future sequence (B, T, 1, H, W)
+        - input_occ_grid_map: occupancy grid map (B, 1, H, W)
         - Returns: [cond, z]
           - cond: conditioning from past via ConvLSTM (B, 32, 16, 16)
           - z: future latent via frame-wise AE (B*T, embed_dim, 16, 16)
@@ -1465,7 +1472,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
         # h_enc : (B, 32, 64, 64)
         
         # Encoder-based conditioning
-        cond_feat = self.cond_encoder(h_enc)       # (B, 128, 16, 16)
+        cond_in = torch.cat([h_enc, input_occ_grid_map], dim=1)   # (B,33,64,64)
+        cond_feat = self.cond_encoder(cond_in)       # (B, 128, 16, 16)
         cond = self.cond_proj(cond_feat)           # (B, 32, 16, 16)
 
         # 2) Past sequence -> conditioning
@@ -1503,19 +1511,16 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         return self.first_stage_model.decode(z)
 
-    def forward(self, x, c, *args, **kwargs):
-        """
-        x: (B *T, C_lat, H_lat, W_lat)
-        c: (B *T, C_cond, H_lat, W_lat)
-        """
-        t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
-        return self.p_losses(x, c, t, *args, **kwargs)
+    def forward(self, z_full, z_masked, m, c, *args, **kwargs):
+
+        t = torch.randint(0, self.num_timesteps, (z_full.shape[0],), device=self.device).long()
+        return self.p_losses(z_full, z_masked, m, c, t, *args, **kwargs)
 
     def shared_step(self, batch, **kwargs):
         
-        input_binary_maps, mask_binary_maps, _ = self.get_input(batch)
+        input_binary_maps, mask_binary_maps, input_occ_grid_map = self.get_input(batch)
         
-        z_past, z_future, cond = self.get_encoding(input_binary_maps, mask_binary_maps)
+        z_past, z_future, cond = self.get_encoding(input_binary_maps, mask_binary_maps, input_occ_grid_map)
 
         b, seq_len, _, h_lat, w_lat = z_past.shape
 
