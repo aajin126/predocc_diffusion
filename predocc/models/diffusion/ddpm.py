@@ -1701,7 +1701,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         x_occ = x_occ[:B_vis]
 
         t0 = time.perf_counter()
-        c, _, gate_alpha = self.get_encoding(x_in, x_gt, x_occ)
+        c, _, gate_alpha, _, _ = self.get_encoding(x_in, x_gt, x_occ)
 
         # 1) duplicate condition
         c = c.repeat_interleave(K, dim=0)             # (B_vis*K, C, H, W)
