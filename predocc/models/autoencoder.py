@@ -597,7 +597,14 @@ class SequenceAutoencoderKL(pl.LightningModule):
                                     out_channels=num_hiddens,
                                     kernel_size=1, 
                                     stride=1)
-        
+
+        self._temporal_decoder = ConvLSTMCell(
+            input_dim=embed_dim,
+            hidden_dim=embed_dim,
+            kernel_size=(3, 3),
+            bias=True,
+        )     
+
         self._decoder = Decoder(
             out_channels= self.out_ch,
             num_hiddens=self.num_hiddens,
@@ -670,21 +677,35 @@ class SequenceAutoencoderKL(pl.LightningModule):
         - Decoder: (B*T, 128, 16, 16) → (B*T, 1, 64, 64)
         - Reshape: (B*T, 1, 64, 64) → (B, T, 1, 64, 64)
         """
-        b_t = z.shape[0]
-        
-        # Step 1: decoder_z_mu
-        z = self._decoder_z_mu(z)  # (B*T, 128, 16, 16)
-        
-        # Step 2: Decoder
-        dec = self._decoder(z)  # (B*T, 1, 64, 64)
-        
-        # Step 3: Reshape back to sequence
+
+        b_t, c, h, w = z.shape
         b = b_t // self.seq_len
-        t = self.seq_len
+        seq_len = self.seq_len
+
+        # (B*T,C,H,W) -> (B,T,C,H,W)
+        z_seq = z.view(b, seq_len, c, h, w)
+
+        # temporal refinement
+        h_dec, c_dec = self._temporal_decoder.init_hidden(batch_size=b, image_size=(h, w))
+        outputs = []
+        for ti in range(seq_len):
+            h_dec, c_dec = self._temporal_decoder(
+                input_tensor=z_seq[:, ti],   # (B,C,H,W)
+                cur_state=[h_dec, c_dec],
+            )
+            outputs.append(h_dec.unsqueeze(1))   # (B,1,C,H,W)
+
+        z_temporal = torch.cat(outputs, dim=1)   # (B,T,C,H,W)
+
+        # back to frame-wise decoder
+        z_temporal = z_temporal.view(b_t, c, h, w)
+        z_temporal = self._decoder_z_mu(z_temporal)   # (B*T,128,16,16)
+        dec = self._decoder(z_temporal)               # (B*T,1,64,64)
+
         _, c_out, h_out, w_out = dec.shape
-        dec = dec.view(b, t, c_out, h_out, w_out)  # (B, T, 1, 64, 64)
-        
+        dec = dec.view(b, seq_len, c_out, h_out, w_out)
         return dec
+
 
     def forward(self, input_seq, x_map=None, sample_posterior=False):
         """
@@ -763,6 +784,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         opt_ae = torch.optim.Adam(
             list(self._encoder.parameters()) +
             list(self._decoder.parameters()) +
+            list(self._temporal_decoder.parameters()) +
             list(self._encoder_z_mu.parameters()) +
             list(self._encoder_z_log_var.parameters()) +
             list(self._decoder_z_mu.parameters()),
