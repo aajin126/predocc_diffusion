@@ -698,7 +698,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         z_temporal = torch.cat(outputs, dim=1)   # (B,T,C,H,W)
 
         # back to frame-wise decoder
-        z_temporal = z_temporal.view(b_t, c, h, w)
+        z_temporal = z_temporal.view(b_t, self.temporal_hidden_dim, h, w)
         z_temporal = self._decoder_z_mu(z_temporal)   # (B*T,128,16,16)
         dec = self._decoder(z_temporal)               # (B*T,1,64,64)
 
