@@ -593,14 +593,14 @@ class SequenceAutoencoderKL(pl.LightningModule):
                                     kernel_size=1, 
                                     stride=1)  
 
-        self._decoder_z_mu = nn.ConvTranspose2d(in_channels=embed_dim, 
+        self._decoder_z_mu = nn.ConvTranspose2d(in_channels=temporal_hidden_dim, 
                                     out_channels=num_hiddens,
                                     kernel_size=1, 
                                     stride=1)
 
         self._temporal_decoder = ConvLSTMCell(
             input_dim=embed_dim,
-            hidden_dim=embed_dim,
+            hidden_dim=temporal_hidden_dim,
             kernel_size=(3, 3),
             bias=True,
         )     
