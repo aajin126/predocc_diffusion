@@ -798,6 +798,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
             list(self._encoder.parameters()) +
             list(self._decoder.parameters()) +
             list(self._temporal_decoder.parameters()) +
+            list(self._temporal_proj.parameters()) +
             list(self._encoder_z_mu.parameters()) +
             list(self._encoder_z_log_var.parameters()) +
             list(self._decoder_z_mu.parameters()),
