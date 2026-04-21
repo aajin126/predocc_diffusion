@@ -593,11 +593,6 @@ class SequenceAutoencoderKL(pl.LightningModule):
                                     kernel_size=1, 
                                     stride=1)  
 
-        self._decoder_z_mu = nn.ConvTranspose2d(in_channels=temporal_hidden_dim, 
-                                    out_channels=num_hiddens,
-                                    kernel_size=1, 
-                                    stride=1)
-
         self._temporal_decoder = ConvLSTMCell(
             input_dim=embed_dim,
             hidden_dim=temporal_hidden_dim,
@@ -605,6 +600,18 @@ class SequenceAutoencoderKL(pl.LightningModule):
             bias=True,
         )     
 
+        self._temporal_proj = nn.Conv2d(
+            in_channels=temporal_hidden_dim,
+            out_channels=embed_dim, 
+            kernel_size=1,
+            stride=1,
+        )
+
+        self._decoder_z_mu = nn.ConvTranspose2d(in_channels=embed_dim, 
+                                    out_channels=num_hiddens,
+                                    kernel_size=1, 
+                                    stride=1)
+        
         self._decoder = Decoder(
             out_channels= self.out_ch,
             num_hiddens=self.num_hiddens,
@@ -687,20 +694,26 @@ class SequenceAutoencoderKL(pl.LightningModule):
 
         # temporal refinement
         h_dec, c_dec = self._temporal_decoder.init_hidden(batch_size=b, image_size=(h, w))
-        outputs = []
+        refined_list = []
         for ti in range(seq_len):
             h_dec, c_dec = self._temporal_decoder(
-                input_tensor=z_seq[:, ti],   # (B,C,H,W)
+                input_tensor=z_seq[:, ti],      # (B, 2, 16, 16)
                 cur_state=[h_dec, c_dec],
             )
-            outputs.append(h_dec.unsqueeze(1))   # (B,1,C,H,W)
 
-        z_temporal = torch.cat(outputs, dim=1)   # (B,T,C,H,W)
+            delta_t = self._temporal_proj(h_dec)   # (B, 2, 16, 16)
 
-        # back to frame-wise decoder
-        z_temporal = z_temporal.view(b_t, self.temporal_hidden_dim, h, w)
-        z_temporal = self._decoder_z_mu(z_temporal)   # (B*T,128,16,16)
-        dec = self._decoder(z_temporal)               # (B*T,1,64,64)
+            # residual update
+            z_t_refined = z_seq[:, ti] + delta_t   # (B, 2, 16, 16)
+
+            refined_list.append(z_t_refined.unsqueeze(1))
+
+        z_refined = torch.cat(refined_list, dim=1)   # (B, T, 2, 16, 16)
+        z_refined = z_refined.view(b_t, c, h, w)     # (B*T, 2, 16, 16)
+
+        # frame-wise decoder
+        z_refined = self._decoder_z_mu(z_refined)    # (B*T, 128, 16, 16)
+        dec = self._decoder(z_refined)               # (B*T, 1, 64, 64)
 
         _, c_out, h_out, w_out = dec.shape
         dec = dec.view(b, seq_len, c_out, h_out, w_out)

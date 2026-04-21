@@ -42,7 +42,7 @@ MAP_X_LIMIT = [0, 6.4]      # Map limits on the x-axis
 MAP_Y_LIMIT = [-3.2, 3.2]   # Map limits on the y-axis
 RESOLUTION = 0.1        # Grid resolution in [m]'
 TRESHOLD_P_OCC = 0.8    # Occupancy threshold
-IOU_THRESHOLDS = (0.08, 0.09, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7)
+IOU_THRESHOLDS = (0.09, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
 all_rows_by_thr = {occ_thr: [] for occ_thr in IOU_THRESHOLDS}
 all_ssim_rows = []
 all_psnr_rows = []
@@ -356,7 +356,7 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=10, ddim_eta=
                 save_psnr_table(all_psnr_rows, output_dir)
                 save_nmi_table(all_nmi_rows, output_dir)
 
-            if save_images:
+            if save_images and batch_idx < 500:
                 fontsize = 8
 
                 # GT occupancy maps
