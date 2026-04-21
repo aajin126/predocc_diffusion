@@ -619,6 +619,8 @@ class SequenceAutoencoderKL(pl.LightningModule):
             num_residual_hiddens=self.num_residual_hiddens,
         )
 
+        self.residual_scale = 0.3
+
         self.loss = instantiate_from_config(lossconfig)
 
         if monitor is not None:
@@ -704,7 +706,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
             delta_t = self._temporal_proj(h_dec)   # (B, 2, 16, 16)
 
             # residual update
-            z_t_refined = z_seq[:, ti] + delta_t   # (B, 2, 16, 16)
+            z_t_refined = z_seq[:, ti] + self.residual_scale * delta_t   # (B, 2, 16, 16)
 
             refined_list.append(z_t_refined.unsqueeze(1))
 
