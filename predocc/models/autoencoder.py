@@ -607,6 +607,13 @@ class SequenceAutoencoderKL(pl.LightningModule):
             stride=1,
         )
 
+        self._temporal_gate = nn.Conv2d(
+            in_channels=temporal_hidden_dim,
+            out_channels=embed_dim,
+            kernel_size=1,
+            stride=1,
+        )
+
         self._decoder_z_mu = nn.ConvTranspose2d(in_channels=embed_dim, 
                                     out_channels=num_hiddens,
                                     kernel_size=1, 
@@ -704,9 +711,11 @@ class SequenceAutoencoderKL(pl.LightningModule):
             )
 
             delta_t = self._temporal_proj(h_dec)   # (B, 2, 16, 16)
+            gate_t = torch.sigmoid(self._temporal_gate(h_dec))  # (B, embed_dim, 16, 16)
 
             # residual update
-            z_t_refined = z_seq[:, ti] + self.residual_scale * delta_t   # (B, 2, 16, 16)
+            z_t_refined = z_seq[:, ti] + gate_t * delta_t   # (B, 2, 16, 16)
+            
 
             refined_list.append(z_t_refined.unsqueeze(1))
 
@@ -800,6 +809,8 @@ class SequenceAutoencoderKL(pl.LightningModule):
             list(self._encoder.parameters()) +
             list(self._decoder.parameters()) +
             list(self._temporal_decoder.parameters()) +
+            list(self._temporal_proj.parameters()) +
+            list(self._temporal_gate.parameters()) +
             list(self._encoder_z_mu.parameters()) +
             list(self._encoder_z_log_var.parameters()) +
             list(self._decoder_z_mu.parameters()),
