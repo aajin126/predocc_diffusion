@@ -556,7 +556,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         in_channels=1,
         out_ch=1,
         resolution=64,
-        temporal_hidden_dim=32,
+        temporal_hidden_dim=16,
         num_hiddens=128,
         num_residual_layers=2,
         num_residual_hiddens=64,
