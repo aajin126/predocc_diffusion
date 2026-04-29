@@ -862,14 +862,12 @@ class SequenceAutoencoderKL(pl.LightningModule):
         curr_ogm = maps["input_binary_maps"].float()                  # (B,10,1,H,W)
         gt_ogm = maps["mask_binary_maps"].float()                    # (B,10,1,H,W)
         ref = curr_ogm[:, -1]                                         # (B,1,H,W)
-
-        mode = getattr(self, "residual_mode", "appear_disappear")
-
+        
         # decoded residual -> reconstructed OGM sequence
         rec_ogm = residual_sequence_to_ogm(
             ref_map=ref,
             residual_sequence=xrec,
-            mode=mode,
+            mode=self.mode,
         )                                                          # (B,10,1,H,W)
 
         gt_seq = gt_ogm[0]        # (10,1,H,W)
