@@ -641,7 +641,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         Returns: (B, T, C, H, W)
         """
         maps = preprocess_batch(batch, self.mode, device=self.device)
-        x = maps["residual_sequence"].float()   # (B, T, 1, H, W)
+        x = maps["residual_sequence"].float()   # (B, T, C, H, W)
         
         return x
 

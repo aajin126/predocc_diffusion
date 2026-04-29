@@ -30,7 +30,7 @@ class AELoss(nn.Module):
         posteriors: distribution object with .kl()
         """
 
-        seq_len = 10
+        seq_len = inputs.shape[1]
         B = inputs.shape[0]
 
         ce_loss = 0
