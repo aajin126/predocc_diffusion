@@ -553,7 +553,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         self,
         lossconfig,
         embed_dim,
-        seq_len=9,
+        seq_len=10,
         in_channels=2,
         out_ch=2,
         resolution=64,
@@ -848,8 +848,8 @@ class SequenceAutoencoderKL(pl.LightningModule):
     def log_images(self, batch, only_inputs=False, **kwargs):
         """
         Logs residual reconstruction and OGM reconstruction IoU.
-        x:    residual/event sequence, (B, T-1, C, H, W)
-        xrec: reconstructed residual/event sequence, (B, T-1, C, H, W)
+        x:    residual/event sequence, (B, T, C, H, W)
+        xrec: reconstructed residual/event sequence, (B, T, C, H, W)
         """
         log = dict()
 
@@ -859,8 +859,9 @@ class SequenceAutoencoderKL(pl.LightningModule):
 
         # original OGM sequence for comparison
         maps = preprocess_batch(batch, self.mode, device=self.device)
-        gt_ogm = maps["mask_binary_maps"].float()                  # (B,10,1,H,W)
-        ref = gt_ogm[:, 0]                                         # (B,1,H,W)
+        curr_ogm = maps["input_binary_maps"].float()                  # (B,10,1,H,W)
+        gt_ogm = maps["mask_binary_maps"].float()                    # (B,10,1,H,W)
+        ref = curr_ogm[:, -1]                                         # (B,1,H,W)
 
         mode = getattr(self, "residual_mode", "appear_disappear")
 
@@ -870,9 +871,6 @@ class SequenceAutoencoderKL(pl.LightningModule):
             residual_sequence=xrec,
             mode=mode,
         )                                                          # (B,10,1,H,W)
-
-        # optional sanity: GT residual -> GT OGM
-        # gt_from_res = residual_sequence_to_ogm(ref, x, mode)
 
         gt_seq = gt_ogm[0]        # (10,1,H,W)
         rec_seq = rec_ogm[0]      # (10,1,H,W)

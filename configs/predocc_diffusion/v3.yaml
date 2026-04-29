@@ -10,6 +10,7 @@ model:
     channels: 2
     conditioning_key: concat
     parameterization: v
+    mode: "appear_disappear"
     monitor: val/loss
     use_ema: True
     convlstm_hidden_dim: 33

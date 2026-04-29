@@ -17,8 +17,9 @@ MAP_Y_LIMIT = [-3.2, 3.2]
 RESOLUTION = 0.1
 TRESHOLD_P_OCC = 0.8
 
-def ogm_to_residual_sequence(mask_binary_maps, mode):
+def ogm_to_residual_sequence(current_map, mask_binary_maps, mode):
     """
+    current_map: (B, 1, H, W)
     mask_binary_maps: (B, T, 1, H, W)
     return:
         signed             -> (B, T-1, 1, H, W)
@@ -27,8 +28,8 @@ def ogm_to_residual_sequence(mask_binary_maps, mode):
     
     mask_binary_maps = mask_binary_maps.float()
 
-    prev = mask_binary_maps[:, :-1].float()  # x0 ... x8
-    curr = mask_binary_maps[:, 1:].float()   # x1 ... x9
+    prev = torch.cat([current_map[:, None], mask_binary_maps[:, :-1]], dim=1)  # x0 ... x9
+    curr = mask_binary_maps   # x1 ... x10
 
     if mode == "signed":
         residual = curr - prev
@@ -123,7 +124,8 @@ def preprocess_batch(batch, mode, device=None):
     input_binary_maps = input_binary_maps.unsqueeze(2)
     mask_binary_maps = mask_binary_maps.unsqueeze(2)
 
-    residual_sequence = ogm_to_residual_sequence(mask_binary_maps, mode)
+    current_map = input_binary_maps[:, -1]              # (B,1,H,W)
+    residual_sequence = ogm_to_residual_sequence(current_map, mask_binary_maps, mode)
 
     batch_out = {
         "input_binary_maps": input_binary_maps,   # (B,SEQ_LEN,1,H,W)
@@ -176,8 +178,6 @@ def preprocess_batch_test(batch, mode, device=None):
     mask_binary_maps = mask_gridMap.discretize(distances_x, distances_y)
     mask_binary_maps = mask_binary_maps.unsqueeze(2)
 
-    residual_sequence = ogm_to_residual_sequence(mask_binary_maps, mode)
-
     # current position:
     obs_pos_N = positions[:, SEQ_LEN-1]
     # calculate relative future positions to current position:
@@ -213,6 +213,8 @@ def preprocess_batch_test(batch, mode, device=None):
     # add channel dimension:
     input_binary_maps = input_binary_maps.unsqueeze(2)
 
+    current_map = input_binary_maps[:, -1]              # (B,1,H,W)
+    residual_sequence = ogm_to_residual_sequence(current_map, mask_binary_maps, mode)
 
     batch_out = {
         "input_binary_maps": input_binary_maps,   # (B,SEQ_LEN,1,H,W)

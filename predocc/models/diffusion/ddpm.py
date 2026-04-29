@@ -34,6 +34,7 @@ from models.diffusion.ddim import DDIMSampler
 from models.convlstm import ConvLSTMCell
 from models.autoencoder import Decoder
 from models.autoencoder import Encoder
+from data.data_postprocessing import residual_sequence_to_ogm
 
 __conditioning_keys__ = {'concat': 'c_concat',
                          'crossattn': 'c_crossattn',
@@ -1327,6 +1328,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         cond_stage_config,
         first_stage_ckpt_path=None,
         convlstm_hidden_dim = 32,
+        mode="appear_disappear",
         *args,**kwargs,):
         super().__init__(
             first_stage_config=first_stage_config,
@@ -1337,6 +1339,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         self.convlstm_hidden_dim = convlstm_hidden_dim
         self.first_stage_ckpt_path = first_stage_ckpt_path
+        self.mode = mode
         ignore_keys = kwargs.pop("ignore_keys", [])
 
         if self.first_stage_ckpt_path is not None:
@@ -1376,7 +1379,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         """
 
         if process is not None:
-            maps = preprocess_batch_test(batch, device=self.device)
+            maps = preprocess_batch_test(batch, self.mode, device=self.device)
 
             input_binary_maps = maps["input_binary_maps"]      # (B,T,1,H,W)
             mask_binary_maps = maps["mask_binary_maps"]        # (B,T,1,H,W)
@@ -1385,19 +1388,21 @@ class PredOccLatentDiffusion(LatentDiffusion):
             y_rel = maps["y_rel"]                                  # (B,T)
             th_rel = maps["th_rel"]                                # (B,T)
             input_occ_grid_map = input_occ_grid_map.reshape(-1, 1, IMG_SIZE, IMG_SIZE)
+            residual_sequence = maps["residual_sequence"]        # (B,T,2,H,W)
 
             
-            out = [input_binary_maps, mask_binary_maps, input_occ_grid_map, x_rel, y_rel, th_rel]
+            out = [input_binary_maps, mask_binary_maps, input_occ_grid_map, x_rel, y_rel, th_rel, residual_sequence]
 
 
         else:
-            maps = preprocess_batch(batch, device=self.device)
+            maps = preprocess_batch(batch, self.mode, device=self.device)
             input_binary_maps = maps["input_binary_maps"]      # (B,T,1,H,W)
             mask_binary_maps = maps["mask_binary_maps"]        # (B,T,1,H,W)
             input_occ_grid_map = maps["input_occ_grid_map"]    # (B,H,W)
             input_occ_grid_map = input_occ_grid_map.reshape(-1, 1, IMG_SIZE, IMG_SIZE)
+            residual_sequence = maps["residual_sequence"]        # (B,T,2,H,W)
 
-            out = [input_binary_maps, mask_binary_maps, input_occ_grid_map]
+            out = [input_binary_maps, mask_binary_maps, input_occ_grid_map, residual_sequence]
         
         return out
 
@@ -1444,11 +1449,12 @@ class PredOccLatentDiffusion(LatentDiffusion):
             raise NotImplementedError(f"encoder_posterior of type '{type(encoder_posterior)}' not yet implemented")
         return self.scale_factor * z
 
-    def get_encoding(self, input_binary_maps, mask_binary_maps=None, input_occ_grid_map=None):
+    def get_encoding(self, input_binary_maps, mask_binary_maps=None, input_occ_grid_map=None, residual_sequence=None):
         """
         Encoding for PredOcc Diffusion with frame-wise Autoencoder:
         - input_binary_maps: past sequence (B, T, 1, H, W)
         - mask_binary_maps: future sequence (B, T, 1, H, W)
+        - residual_sequence: residual sequence (B, T, 2, H, W)
         - Returns: [cond, z]
           - cond: conditioning from past via ConvLSTM (B, 32, 16, 16)
           - z: future latent via frame-wise AE (B*T, embed_dim, 16, 16)
@@ -1471,10 +1477,10 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         # 2) Future sequence -> frame-wise latent
         z = None
-        if mask_binary_maps is not None:
+        if residual_sequence is not None:
             with torch.no_grad():
                 # Frame-wise encode: (B, T, 1, H, W) -> (B, T*embed_dim, 16, 16)
-                encoder_posterior = self.first_stage_model.encode(mask_binary_maps)
+                encoder_posterior = self.first_stage_model.encode(residual_sequence)
                 z = self.get_first_stage_encoding(encoder_posterior)  # (B, T*embed_dim, 16, 16)
 
         out = [cond, z]
@@ -1503,9 +1509,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
     def shared_step(self, batch, **kwargs):
         
-        input_binary_maps, mask_binary_maps, input_occ_grid_map = self.get_input(batch)
+        input_binary_maps, mask_binary_maps, input_occ_grid_map, residual_sequence = self.get_input(batch)
         
-        cond, z = self.get_encoding(input_binary_maps, mask_binary_maps, input_occ_grid_map)
+        cond, z = self.get_encoding(input_binary_maps, mask_binary_maps, input_occ_grid_map, residual_sequence)
 
         cond = cond.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (B*T, 32, 16, 16)
 
@@ -1598,7 +1604,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         log = dict()
 
-        x_in, x_gt, x_occ = self.get_input(batch)
+        x_in, x_gt, x_occ, x_res = self.get_input(batch)
 
         B_vis = 1                    # number of condition
         K = N                        # number of multimodal samples
@@ -1607,9 +1613,10 @@ class PredOccLatentDiffusion(LatentDiffusion):
         x_in = x_in[:B_vis]
         x_gt = x_gt[:B_vis]
         x_occ = x_occ[:B_vis]
+        x_res = x_res[:B_vis]     # (B,10,2,H,W)
 
         t0 = time.perf_counter()
-        c, _ = self.get_encoding(x_in, x_gt, x_occ)
+        c, _ = self.get_encoding(x_in, None, x_occ, None)
 
         # 1) duplicate condition
         c = c.repeat_interleave(K, dim=0)             # (B_vis*K, C, H, W)
@@ -1634,9 +1641,18 @@ class PredOccLatentDiffusion(LatentDiffusion):
                 eta=ddim_eta
             )
 
-        # samples shape: (N*T, 2, 16, 16) - each frame independently denoised
-        # decode sampled latent to future sequence
-        pred_seq = self.decode_first_stage(samples)   # (B_vis*K, T, 1, H, W)
+        # decode latent -> residual/event sequence
+        pred_res = self.decode_first_stage(samples)   # (B*K,T,2,H,W)
+
+        # residual/event -> future OGM
+        ref = x_in[:, -1]                              # (B,1,H,W)
+        ref = ref.repeat_interleave(K, dim=0)          # (B*K,1,H,W)
+
+        pred_seq = residual_sequence_to_ogm(
+            ref_map=ref,
+            residual_sequence=pred_res,
+            mode=self.mode,
+        )  
 
         if torch.cuda.is_available():
             torch.cuda.synchronize()

@@ -21,9 +21,9 @@ def residual_sequence_to_ogm(ref_map, residual_sequence, mode):
     """
     residual_sequence:
         signed:
-            (B, T-1, 1, H, W)
+            (B, T, 1, H, W)
         appear_disappear:
-            (B, T-1, 2, H, W)
+            (B, T, 2, H, W)
 
     return:
         ogm_sequence: (B, T, 1, H, W)
@@ -42,7 +42,7 @@ def residual_sequence_to_ogm(ref_map, residual_sequence, mode):
 
             frames.append(cur)
 
-    elif mode in ["appear_disappear", "event"]:
+    elif mode == "appear_disappear":
         for i in range(residual_sequence.shape[1]):
             appear = residual_sequence[:, i, 0:1].float()
             disappear = residual_sequence[:, i, 1:2].float()
@@ -55,4 +55,4 @@ def residual_sequence_to_ogm(ref_map, residual_sequence, mode):
     else:
         raise ValueError(f"Unknown residual mode: {mode}")
 
-    return torch.stack(frames, dim=1)  # (B,T,1,H,W)
+    return torch.stack(frames, dim=1)[:, 1:]  # (B,T,1,H,W)
