@@ -4,7 +4,10 @@ model:
   params:
     monitor: "val/total_loss"
     embed_dim: 2
-    seq_len: 10
+    seq_len: 9
+    in_channels: 2
+    out_ch: 2
+    mode: "appear_disappear"
     lossconfig:
       target: modules.losses.AELoss
       params:

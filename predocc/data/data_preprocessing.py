@@ -17,14 +17,40 @@ MAP_Y_LIMIT = [-3.2, 3.2]
 RESOLUTION = 0.1
 TRESHOLD_P_OCC = 0.8
 
+def ogm_to_residual_sequence(mask_binary_maps, mode):
+    """
+    mask_binary_maps: (B, T, 1, H, W)
+    return:
+        signed             -> (B, T-1, 1, H, W)
+        appear_disappear   -> (B, T-1, 2, H, W)
+    """
+    
+    mask_binary_maps = mask_binary_maps.float()
 
-def preprocess_batch(batch, device=None):
+    prev = mask_binary_maps[:, :-1].float()  # x0 ... x8
+    curr = mask_binary_maps[:, 1:].float()   # x1 ... x9
+
+    if mode == "signed":
+        residual = curr - prev
+        return residual  # (B,T-1,1,H,W)
+
+    elif mode == "appear_disappear":
+        appear = (1.0 - prev) * curr          # previous empty -> current occupied
+        disappear = prev * (1.0 - curr)       # previous occupied -> current empty
+        residual = torch.cat([appear, disappear], dim=2)
+        return residual  # (B,T-1,2,H,W)
+
+    else:
+        raise ValueError(f"Unknown residual mode: {mode}")
+
+def preprocess_batch(batch, mode, device=None):
     """
     yields:
         batch_out: dict
             'input_binary_maps' : (B, SEQ_LEN, 1, H, W)
             'mask_binary_maps'  : (B, SEQ_LEN, 1, H, W)
             'input_occ_grid_map': (B, H, W)
+            'residual_sequence' : (B, SEQ_LEN-1, 2, H, W)
     """
 
     scans = batch["scan"]
@@ -64,6 +90,8 @@ def preprocess_batch(batch, device=None):
 
     mask_binary_maps = mask_gridMap.discretize(future_distances_x, future_distances_y)  # (B,SEQ_LEN,H,W)
 
+    residual_sequence = ogm_to_residual_sequence(mask_binary_maps, mode)
+
     # history maps (input)
     input_gridMap = LocalMap(X_lim=MAP_X_LIMIT,
                             Y_lim=MAP_Y_LIMIT,
@@ -100,18 +128,23 @@ def preprocess_batch(batch, device=None):
     batch_out = {
         "input_binary_maps": input_binary_maps,   # (B,SEQ_LEN,1,H,W)
         "mask_binary_maps": mask_binary_maps,     # (B,SEQ_LEN,1,H,W)
-        "input_occ_grid_map": input_occ_grid_map  # (B,H,W)
+        "input_occ_grid_map": input_occ_grid_map,  # (B,H,W)
+        "residual_sequence": residual_sequence     # (B,SEQ_LEN-1,2,H,W)    
     }
 
     return batch_out
 
-def preprocess_batch_test(batch, device=None):
+def preprocess_batch_test(batch, mode, device=None):
     """
     yields:
         batch_out: dict
             'input_binary_maps' : (B, SEQ_LEN, 1, H, W)
             'mask_binary_maps'  : (B, SEQ_LEN, 1, H, W)
             'input_occ_grid_map': (B, H, W)
+            'x_rel': (B, SEQ_LEN)
+            'y_rel': (B, SEQ_LEN)
+            'th_rel': (B, SEQ_LEN)
+            'residual_sequence' : (B, SEQ_LEN-1, 2, H, W)
     """
 
     scans = batch["scan"]
@@ -142,6 +175,8 @@ def preprocess_batch_test(batch, device=None):
     # discretize to binary maps:
     mask_binary_maps = mask_gridMap.discretize(distances_x, distances_y)
     mask_binary_maps = mask_binary_maps.unsqueeze(2)
+
+    residual_sequence = ogm_to_residual_sequence(mask_binary_maps, mode)
 
     # current position:
     obs_pos_N = positions[:, SEQ_LEN-1]
@@ -185,6 +220,7 @@ def preprocess_batch_test(batch, device=None):
         "input_occ_grid_map": input_occ_grid_map,  # (B,H,W)
         "x_rel": x_rel,                           # (B,SEQ_LEN)
         "y_rel": y_rel,                           # (B,SEQ_LEN)
-        "th_rel": th_rel                          # (B,SEQ_LEN)
+        "th_rel": th_rel,                          # (B,SEQ_LEN)
+        "residual_sequence": residual_sequence     # (B,SEQ_LEN-1,2,H,W)    
     }
     return batch_out

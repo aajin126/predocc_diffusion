@@ -12,6 +12,7 @@ from modules.diffusionmodules.model import Encoder, Decoder
 from modules.distributions.distributions import DiagonalGaussianDistribution
 from models.convlstm import ConvLSTMCell
 from data.data_preprocessing import preprocess_batch
+from data.data_postprocessing import residual_sequence_to_ogm
 
 from util import instantiate_from_config
 
@@ -552,14 +553,15 @@ class SequenceAutoencoderKL(pl.LightningModule):
         self,
         lossconfig,
         embed_dim,
-        seq_len=10,
-        in_channels=1,
-        out_ch=1,
+        seq_len=9,
+        in_channels=2,
+        out_ch=2,
         resolution=64,
         temporal_hidden_dim=32,
         num_hiddens=128,
         num_residual_layers=2,
         num_residual_hiddens=64,
+        mode="appear_disappear",
         image_key="image",
         monitor=None,
     ):
@@ -576,6 +578,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         self.num_hiddens = num_hiddens
         self.num_residual_layers = num_residual_layers
         self.num_residual_hiddens = num_residual_hiddens
+        self.mode = mode
 
         self._encoder = Encoder(
             in_channels=in_channels,  # 1 channel per frame
@@ -628,6 +631,19 @@ class SequenceAutoencoderKL(pl.LightningModule):
             print("Missing keys:", missing)
         if len(unexpected) > 0:
             print("Unexpected keys:", unexpected)
+
+    # ------------------------------------------------------------------
+    # Data handling
+    # ------------------------------------------------------------------
+    def get_input(self, batch, k):
+        """
+        For PredOccDataset, use residual_sequence as the AE target sequence.
+        Returns: (B, T, C, H, W)
+        """
+        maps = preprocess_batch(batch, self.mode, device=self.device)
+        x = maps["residual_sequence"].float()   # (B, T, 1, H, W)
+        
+        return x
 
     # ------------------------------------------------------------------
     # Core VAE
@@ -695,20 +711,6 @@ class SequenceAutoencoderKL(pl.LightningModule):
         z = posterior.sample() if sample_posterior else posterior.mode()  # (B*T, 2, 16, 16)
         dec = self.decode(z)
         return dec, posterior
-
-    # ------------------------------------------------------------------
-    # Data handling
-    # ------------------------------------------------------------------
-    def get_input(self, batch, k):
-        """
-        For PredOccDataset, use mask_binary_maps as the AE target sequence.
-        Returns: (B, T, C, H, W)
-        """
-        maps = preprocess_batch(batch, device=self.device)
-        x = maps["mask_binary_maps"]  # (B, T, 1, H, W)
-        x = x.reshape(-1, SEQ_LEN, 1, IMG_SIZE, IMG_SIZE)
-        
-        return x
 
     # ------------------------------------------------------------------
     # Training / validation
@@ -845,32 +847,45 @@ class SequenceAutoencoderKL(pl.LightningModule):
     @torch.no_grad()
     def log_images(self, batch, only_inputs=False, **kwargs):
         """
-        Returns:
-            inputs:          (B*T, C, H, W) for easy grid logging
-            reconstructions: (B*T, C, H, W)
-            samples:         (B*T, C, H, W)
+        Logs residual reconstruction and OGM reconstruction IoU.
+        x:    residual/event sequence, (B, T-1, C, H, W)
+        xrec: reconstructed residual/event sequence, (B, T-1, C, H, W)
         """
         log = dict()
-        x = self.get_input(batch, self.image_key)
-        x = x.to(self.device)   # (B, T, C, H, W)
-        b, t, c, h, w = x.shape
-        xrec, posterior = self(x)                                   # (B,T,C,H,W)
 
-        # batch 0
-        gt_seq = x[0]         # (T,C,H,W)
-        rec_seq = xrec[0]     # (T,C,H,W)
+        # residual sequence
+        x = self.get_input(batch, self.image_key).to(self.device)  # (B,9,C,H,W)
+        xrec, posterior = self(x)                                  # (B,9,C,H,W)
 
-        # frame-wise IoU
+        # original OGM sequence for comparison
+        maps = preprocess_batch(batch, self.mode, device=self.device)
+        gt_ogm = maps["mask_binary_maps"].float()                  # (B,10,1,H,W)
+        ref = gt_ogm[:, 0]                                         # (B,1,H,W)
+
+        mode = getattr(self, "residual_mode", "appear_disappear")
+
+        # decoded residual -> reconstructed OGM sequence
+        rec_ogm = residual_sequence_to_ogm(
+            ref_map=ref,
+            residual_sequence=xrec,
+            mode=mode,
+        )                                                          # (B,10,1,H,W)
+
+        # optional sanity: GT residual -> GT OGM
+        # gt_from_res = residual_sequence_to_ogm(ref, x, mode)
+
+        gt_seq = gt_ogm[0]        # (10,1,H,W)
+        rec_seq = rec_ogm[0]      # (10,1,H,W)
+
         iou_list = []
-        for ti in range(t):
+        for ti in range(gt_seq.shape[0]):
             iou_t = self.compute_iou(rec_seq[ti], gt_seq[ti], occ_thr=0.3)
             iou_list.append(iou_t.item())
 
-        panel = torch.cat([gt_seq, rec_seq], dim=0)       # (2T,C,H,W)
+        panel = torch.cat([gt_seq, rec_seq], dim=0)  # (20,1,H,W)
         grid = make_grid(panel, nrow=10, normalize=False, value_range=(0, 1))
 
         grid_np = grid.detach().cpu().permute(1, 2, 0).numpy()
-
         if grid_np.shape[-1] == 1:
             grid_np = grid_np[..., 0]
 
@@ -878,11 +893,10 @@ class SequenceAutoencoderKL(pl.LightningModule):
         ax.imshow(grid_np, cmap="gray", vmin=0.0, vmax=1.0)
         ax.axis("off")
 
-        iou_text = "  ".join([f"t{ti+1}:{iou_list[ti]:.3f}" for ti in range(t)])
-        ax.set_title(f"Frame-wise IoU | {iou_text}", fontsize=12)
+        iou_text = "  ".join([f"t{ti+1}:{iou_list[ti]:.3f}" for ti in range(10)])
+        ax.set_title(f"OGM IoU from residual reconstruction | {iou_text}", fontsize=12)
 
         log["GT | RECON | IoU"] = fig
-
         return log
 
 class IdentityFirstStage(torch.nn.Module):
