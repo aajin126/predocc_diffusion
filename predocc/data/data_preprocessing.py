@@ -90,8 +90,6 @@ def preprocess_batch(batch, mode, device=None):
 
     mask_binary_maps = mask_gridMap.discretize(future_distances_x, future_distances_y)  # (B,SEQ_LEN,H,W)
 
-    residual_sequence = ogm_to_residual_sequence(mask_binary_maps, mode)
-
     # history maps (input)
     input_gridMap = LocalMap(X_lim=MAP_X_LIMIT,
                             Y_lim=MAP_Y_LIMIT,
@@ -124,6 +122,8 @@ def preprocess_batch(batch, mode, device=None):
     # add channel dimension:
     input_binary_maps = input_binary_maps.unsqueeze(2)
     mask_binary_maps = mask_binary_maps.unsqueeze(2)
+
+    residual_sequence = ogm_to_residual_sequence(mask_binary_maps, mode)
 
     batch_out = {
         "input_binary_maps": input_binary_maps,   # (B,SEQ_LEN,1,H,W)
