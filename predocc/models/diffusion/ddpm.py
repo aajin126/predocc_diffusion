@@ -1328,7 +1328,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         cond_stage_config,
         first_stage_ckpt_path=None,
         convlstm_hidden_dim = 32,
-        mode="appear_disappear",
+        mode="signed",
         *args,**kwargs,):
         super().__init__(
             first_stage_config=first_stage_config,
