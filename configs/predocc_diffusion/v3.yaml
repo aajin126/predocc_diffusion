@@ -7,7 +7,7 @@ model:
     log_every_t: 200
     timesteps: 1000
     image_size: 16
-    channels: 2
+    channels: 20
     conditioning_key: concat
     parameterization: v
     monitor: val/loss
@@ -48,19 +48,16 @@ model:
 
 
     unet_config:
-      target: modules.diffusionmodules.unet_latent_shift.UNetModel
+      target: modules.diffusionmodules.openaimodel.UNetModel
       params:
         image_size: 16
-        in_channels: 35  # 34 : x_noisy(2) + cond(32) # 4 : x_noisy(2) + cond(2)
-        out_channels: 2
+        in_channels: 53  # 35 : x_noisy(20) + cond(33) # 4 : x_noisy(2) + cond(2)
+        out_channels: 20
         model_channels: 128
         attention_resolutions: [4]
         num_res_blocks: 1
         channel_mult: [1, 2]
         num_heads: 8
-        use_temporal_shift: True
-        num_frames: 10
-        shift_fold_div: 3
         use_spatial_transformer: False
         use_checkpoint: True
         legacy: False

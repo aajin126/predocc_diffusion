@@ -1451,7 +1451,7 @@ class PredOccLatentDiffusion(LatentDiffusion):
         - mask_binary_maps: future sequence (B, T, 1, H, W)
         - Returns: [cond, z]
           - cond: conditioning from past via ConvLSTM (B, 32, 16, 16)
-          - z: future latent via frame-wise AE (B*T, embed_dim, 16, 16)
+          - z: future latent via frame-wise AE (B, T*embed_dim, 16, 16)
         """
         b, seq_len, c , h, w = input_binary_maps.shape
         
@@ -1473,9 +1473,14 @@ class PredOccLatentDiffusion(LatentDiffusion):
         z = None
         if mask_binary_maps is not None:
             with torch.no_grad():
-                # Frame-wise encode: (B, T, 1, H, W) -> (B, T*embed_dim, 16, 16)
+                # Frame-wise encode: (B, T, 1, H, W) -> (B*T, embed_dim, 16, 16)
                 encoder_posterior = self.first_stage_model.encode(mask_binary_maps)
-                z = self.get_first_stage_encoding(encoder_posterior)  # (B, T*embed_dim, 16, 16)
+                z_bt = self.get_first_stage_encoding(encoder_posterior)  # (B*T, embed_dim, 16, 16)
+                # Reshape to channel stack: (B, T*C, H, W)
+                B, T, _, _, _ = mask_binary_maps.shape
+                _, C_lat, H_lat, W_lat = z_bt.shape
+                z = z_bt.view(B, T, C_lat, H_lat, W_lat)
+                z = z.reshape(B, T * C_lat, H_lat, W_lat)
 
         out = [cond, z]
         
@@ -1495,8 +1500,8 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
     def forward(self, x, c, *args, **kwargs):
         """
-        x: (B *T, C_lat, H_lat, W_lat)
-        c: (B *T, C_cond, H_lat, W_lat)
+        x: (B, T * C_lat, H_lat, W_lat)
+        c: (B, C_cond, H_lat, W_lat)
         """
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
         return self.p_losses(x, c, t, *args, **kwargs)
@@ -1506,8 +1511,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
         input_binary_maps, mask_binary_maps, input_occ_grid_map = self.get_input(batch)
         
         cond, z = self.get_encoding(input_binary_maps, mask_binary_maps, input_occ_grid_map)
-
-        cond = cond.repeat_interleave(self.first_stage_model.seq_len, dim=0)  # (B*T, 32, 16, 16)
 
         loss = self(z, cond) # forward
 
@@ -1614,9 +1617,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
         # 1) duplicate condition
         c = c.repeat_interleave(K, dim=0)             # (B_vis*K, C, H, W)
 
-        # 2) expand time axis
-        cond_exp = c.repeat_interleave(T, dim=0)      # (B_vis*K*T, C, H, W)
-        
         # DDIM full sampling from random noise -> predicted future latent per frame
         # batch_size=N*T will generate N*T independent samples
         if torch.cuda.is_available():
@@ -1625,18 +1625,22 @@ class PredOccLatentDiffusion(LatentDiffusion):
         with self.ema_scope("Plotting"):
             # DDIM samples N latents independently
             # Input: cond (T*N, 32, 16, 16), batch_size=N
-            # Output: samples (T*N, 2, 16, 16) 
+            # Output: samples (T*N, T*C_lat, 16, 16) 
             samples, _ = self.sample_log(
-                cond=cond_exp,
-                batch_size=cond_exp.shape[0],
+                cond=c,
+                batch_size=c.shape[0],
                 ddim=True,
                 ddim_steps=ddim_steps,
                 eta=ddim_eta
             )
 
-        # samples shape: (N*T, 2, 16, 16) - each frame independently denoised
+        # samples shape: (N*T, T*C_lat, 16, 16) 
+        BK, TC, H_lat, W_lat = samples.shape
+        C_lat = TC // T
+        samples_bt = samples.view(BK, T, C_lat, H_lat, W_lat)
+        samples_bt = samples_bt.reshape(BK * T, C_lat, H_lat, W_lat)
         # decode sampled latent to future sequence
-        pred_seq = self.decode_first_stage(samples)   # (B_vis*K, T, 1, H, W)
+        pred_seq = self.decode_first_stage(samples_bt)   # (B_vis*K, T, 1, H, W)
 
         if torch.cuda.is_available():
             torch.cuda.synchronize()
@@ -1653,7 +1657,6 @@ class PredOccLatentDiffusion(LatentDiffusion):
 
         # GT vs DDIM prediction : 2 rows x T cols
         vis_list = []
-        T = x_gt.shape[1]
         
         panel = torch.cat([x_gt, pred_seq], dim=1)   # (B_vis*K, 2T,1,H,W)
         panel = panel.reshape(-1, 1, 64, 64)            # (B*2T, 1, H, W)
