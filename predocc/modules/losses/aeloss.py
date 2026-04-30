@@ -9,8 +9,9 @@ class AELoss(nn.Module):
         logvar_init=0.0,
         kl_weight=0.001,
         stay_eps=0.01,
+        lambda_base=1.0,
         lambda_stay=1.0,
-        lambda_event=5.0,
+        lambda_event=2.0,
         lambda_sign=0.5,
     ):
         super().__init__()
@@ -32,6 +33,8 @@ class AELoss(nn.Module):
         stay_mask = (target.abs() < self.stay_eps).float()
         event_mask = 1.0 - stay_mask
 
+        base_loss = F.smooth_l1_loss(pred, target, reduction="mean")
+
         # stay: unchanged cells should stay exactly zero
         stay_loss = (stay_mask * pred.abs()).sum() / (stay_mask.sum() + 1e-6)
 
@@ -43,7 +46,8 @@ class AELoss(nn.Module):
         sign_loss = (event_mask * F.relu(-pred * target)).sum() / (event_mask.sum() + 1e-6)
 
         data_loss = (
-            self.lambda_stay * stay_loss
+            self.lambda_base * base_loss
+            + self.lambda_stay * stay_loss
             + self.lambda_event * event_loss
             + self.lambda_sign * sign_loss
         )
@@ -53,6 +57,7 @@ class AELoss(nn.Module):
             "event_loss": event_loss.detach(),
             "sign_loss": sign_loss.detach(),
         }
+
         return data_loss, logs
     
     def forward(self, inputs, reconstructions, posteriors, optimizer_idx=None, global_step=None, split="train"):
