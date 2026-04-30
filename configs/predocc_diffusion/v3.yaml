@@ -16,7 +16,7 @@ model:
     convlstm_hidden_dim: 33
     scale_factor: 0.374106
 
-    first_stage_ckpt_path: "./pretrained_models/first_stage_models/AE/v7.0/model.ckpt"
+    first_stage_ckpt_path: "./pretrained_models/first_stage_models/AE/v9.0/model.ckpt"
 
     first_stage_config:
       target: models.autoencoder.SequenceAutoencoderKL

@@ -1648,9 +1648,11 @@ class PredOccLatentDiffusion(LatentDiffusion):
         ref = x_in[:, -1]                              # (B,1,H,W)
         ref = ref.repeat_interleave(K, dim=0)          # (B*K,1,H,W)
 
+        pred_res_signed = pred_res * 2.0 - 1.0
+
         pred_seq = residual_sequence_to_ogm(
             ref_map=ref,
-            residual_sequence=pred_res,
+            residual_sequence=pred_res_signed,
             mode=self.mode,
         )  
 
