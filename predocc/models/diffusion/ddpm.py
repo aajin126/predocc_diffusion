@@ -1807,12 +1807,14 @@ class PredOccLatentDiffusion(LatentDiffusion):
         z_masked_2d = rearrange(z_masked, 'b t c h w -> b (t c) h w')  # (BK, 2T*C, h, w)
         m_2d = rearrange(m, 'b t c h w -> b (t c) h w')                # (BK, 2T, h, w)
 
+        cond = torch.cat([z_masked_2d, m_2d], dim=1)
+
         if torch.cuda.is_available():
             torch.cuda.synchronize()
 
         with self.ema_scope("Plotting"):
             samples, _ = self.sample_log(
-                cond=[z_masked_2d, m_2d],
+                cond=cond,
                 batch_size=BK,
                 ddim=True,
                 ddim_steps=ddim_steps,
