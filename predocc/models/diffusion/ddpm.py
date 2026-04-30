@@ -1690,7 +1690,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
         z_masked_2d = rearrange(z_masked, 'b t c h w -> b (t c) h w')   # (B, 2T*C, H, W)
         m_2d = rearrange(m, 'b t c h w -> b (t c) h w')                 # (B, 2T, H, W)
 
-        model_output = self.apply_model(x_noisy_2d, t, c_concat=[z_masked_2d, m_2d])
+        cond = torch.cat([z_masked_2d, m_2d], dim=1)
+
+        model_output = self.apply_model(x_noisy_2d, t, cond=cond)
 
         loss_dict = {}
         prefix = "train" if self.training else "val"
