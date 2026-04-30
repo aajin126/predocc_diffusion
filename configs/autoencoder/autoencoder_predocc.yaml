@@ -12,6 +12,10 @@ model:
       target: modules.losses.AELoss
       params:
         kl_weight: 0.000001
+        stay_eps: 0.01
+        lambda_stay: 1.0
+        lambda_event: 5.0
+        lambda_sign: 0.5
 
 
 data:

@@ -86,46 +86,67 @@ class Encoder(nn.Module):
 
 # Decoder:
 class Decoder(nn.Module):
-    def __init__(self, out_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
+    def __init__(self, out_channels, num_hiddens, num_residual_layers, num_residual_hiddens, activation="tanh"):
         super(Decoder, self).__init__()
         
         self._residual_stack = ResidualStack(in_channels=num_hiddens,
                                              num_hiddens=num_hiddens,
                                              num_residual_layers=num_residual_layers,
                                              num_residual_hiddens=num_residual_hiddens)
+        # 16x16 -> 32x32
+        self._up_2 = nn.Sequential(
+                                    nn.ReLU(),
+                                    nn.Upsample(scale_factor=2, mode="nearest"),
+                                    nn.Conv2d(
+                                        in_channels=num_hiddens,
+                                        out_channels=num_hiddens // 2,
+                                        kernel_size=3,
+                                        stride=1,
+                                        padding=1,
+                                    ),
+                                    nn.BatchNorm2d(num_hiddens // 2),
+                                    nn.ReLU(),
+                                )
+        
+        # 32x32 -> 64x64
+        self._up_1 = nn.Sequential(
+                                    nn.Upsample(scale_factor=2, mode="nearest"),
+                                    nn.Conv2d(
+                                        in_channels=num_hiddens // 2,
+                                        out_channels=num_hiddens // 2,
+                                        kernel_size=3,
+                                        stride=1,
+                                        padding=1,
+                                    ),
+                                    nn.BatchNorm2d(num_hiddens // 2),
+                                    nn.ReLU(),
+                                )
 
-        self._conv_trans_2 = nn.Sequential(*[
-                                            nn.ReLU(),
-                                            nn.ConvTranspose2d(in_channels=num_hiddens,
-                                                              out_channels=num_hiddens//2,
-                                                              kernel_size=4,
-                                                              stride=2,
-                                                              padding=1),
-                                            nn.BatchNorm2d(num_hiddens//2),
-                                            nn.ReLU()
-                                        ])
+        self.conv_out = nn.Conv2d(
+                                    in_channels=num_hiddens // 2,
+                                    out_channels=out_channels,
+                                    kernel_size=3,
+                                    stride=1,
+                                    padding=1,
+                                )
 
-        self._conv_trans_1 = nn.Sequential(*[
-                                            nn.ConvTranspose2d(in_channels=num_hiddens//2,
-                                                              out_channels=num_hiddens//2,
-                                                              kernel_size=4,
-                                                              stride=2,
-                                                              padding=1),
-                                            nn.BatchNorm2d(num_hiddens//2),
-                                            nn.ReLU(),                  
-                                            nn.Conv2d(in_channels=num_hiddens//2,
-                                                      out_channels=out_channels,
-                                                      kernel_size=3,
-                                                      stride=1,
-                                                      padding=1),
-                                            nn.Sigmoid() # nn.Tanh()
-                                        ])
+        if activation == "tanh":
+            self.activation = nn.Tanh()
+        elif activation == "sigmoid":
+            self.activation = nn.Sigmoid()
+        elif activation in [None, "none"]:
+            self.activation = nn.Identity()
+        else:
+            raise ValueError(f"Unknown activation: {activation}")
 
     def forward(self, inputs):
         x = self._residual_stack(inputs)
-        x = self._conv_trans_2(x)
-        x = self._conv_trans_1(x)
+        x = self._up_2(x)
+        x = self._up_1(x)
+        x = self.conv_out(x)
+        x = self.activation(x)
         return x
+
 
 
 class VQModel(pl.LightningModule):
@@ -562,6 +583,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         num_residual_layers=2,
         num_residual_hiddens=64,
         mode="signed",
+        activation="tanh",
         image_key="image",
         monitor=None,
     ):
@@ -579,6 +601,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         self.num_residual_layers = num_residual_layers
         self.num_residual_hiddens = num_residual_hiddens
         self.mode = mode
+        self.activation = activation
 
         self._encoder = Encoder(
             in_channels=in_channels,  # 1 channel per frame
@@ -596,7 +619,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
                                     kernel_size=1, 
                                     stride=1)  
 
-        self._decoder_z_mu = nn.ConvTranspose2d(in_channels=embed_dim, 
+        self._decoder_z_mu = nn.Conv2d(in_channels=embed_dim, 
                                     out_channels=num_hiddens,
                                     kernel_size=1, 
                                     stride=1)
@@ -606,6 +629,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
             num_hiddens=self.num_hiddens,
             num_residual_layers=self.num_residual_layers,
             num_residual_hiddens=self.num_residual_hiddens,
+            activation=self.activation
         )
 
         self.loss = instantiate_from_config(lossconfig)
@@ -775,7 +799,7 @@ class SequenceAutoencoderKL(pl.LightningModule):
         return opt_ae
     
     def get_last_layer(self):
-        return self._decoder._conv_trans_1[3].weight
+        return self._decoder.conv_out.weight
     
     @torch.no_grad()
     def estimate_latent_stats(self, dataloader, num_batches=50, use_mode=False):
@@ -863,11 +887,10 @@ class SequenceAutoencoderKL(pl.LightningModule):
         gt_ogm = maps["mask_binary_maps"].float()                    # (B,10,1,H,W)
         ref = curr_ogm[:, -1]                                         # (B,1,H,W)
         
-        xrec_signed = xrec * 2.0 - 1.0
         # decoded residual -> reconstructed OGM sequence
         rec_ogm = residual_sequence_to_ogm(
             ref_map=ref,
-            residual_sequence=xrec_signed,
+            residual_sequence=xrec,
             mode=self.mode,
         )                                                          # (B,10,1,H,W)
 
