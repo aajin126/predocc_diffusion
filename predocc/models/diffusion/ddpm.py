@@ -1710,8 +1710,9 @@ class PredOccLatentDiffusion(LatentDiffusion):
         # m: past=1, future=0  -> unknown = 1-m
 
         unknown_mask = 1.0 - m                                          # (B, 2T, 1, H, W)
+        unknown_mask_2d = unknown_mask_2d.expand(-1, -1, z_full.shape[2], -1, -1)
         unknown_mask_2d = rearrange(unknown_mask, 'b t c h w -> b (t c) h w')  # (B, 2T, H, W)
-        
+    
         
         loss_simple_raw = self.get_loss(model_output, target_2d, mean=False)
         loss_simple_raw = loss_simple_raw * unknown_mask_2d  # apply mask to loss
