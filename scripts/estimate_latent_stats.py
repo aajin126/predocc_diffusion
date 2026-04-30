@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', )))
-sys.path.append("/home/oem/hj/predocc_diffusion/predocc")
+sys.path.append("/home/ewhaglab/develop/predocc_diffusion/predocc")
 from predocc.util import instantiate_from_config
 
 # config load
@@ -16,7 +16,7 @@ config.data.params.validation.params.data_root = "/home/ewhaglab/develop/data/OG
 
 model = instantiate_from_config(config.model)
 ckpt = torch.load(
-    "/home/ewhaglab/develop/predocc_diffusion/pretrained_models/first_stage_models/AE/v7.0/model.ckpt",
+    "/home/ewhaglab/develop/predocc_diffusion/pretrained_models/first_stage_models/AE/v8.0/model.ckpt",
     map_location="cpu",
 )
 state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
