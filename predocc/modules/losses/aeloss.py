@@ -17,6 +17,7 @@ class AELoss(nn.Module):
         super().__init__()
         self.kl_weight = kl_weight
         self.stay_eps = stay_eps
+        self.lambda_base = lambda_base
         self.lambda_stay = lambda_stay
         self.lambda_event = lambda_event
         self.lambda_sign = lambda_sign
