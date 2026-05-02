@@ -51,7 +51,7 @@ def preprocess_batch(batch, device=None):
     future_poses = positions[:, SEQ_LEN:] # (B,SEQ_LEN,3)
 
     noise_std = [0, 0, 0] #[0.00111, 0.00112, 0.02319]
-    pos_origin = input_gridMap.origin_pose_prediction(vel_N, obs_pos_N, 1, noise_std)
+    pos_origin = mask_gridMap.origin_pose_prediction(vel_N, obs_pos_N, 1, noise_std)
 
     x_future_odom = torch.zeros(B, SEQ_LEN, device=device or scans.device)
     y_future_odom = torch.zeros(B, SEQ_LEN, device=device or scans.device)
