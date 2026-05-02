@@ -42,7 +42,7 @@ MAP_X_LIMIT = [0, 6.4]      # Map limits on the x-axis
 MAP_Y_LIMIT = [-3.2, 3.2]   # Map limits on the y-axis
 RESOLUTION = 0.1        # Grid resolution in [m]'
 TRESHOLD_P_OCC = 0.8    # Occupancy threshold
-IOU_THRESHOLDS = (0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09)
+IOU_THRESHOLDS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.07, 0.08, 0.09)
 all_rows_by_thr = {occ_thr: [] for occ_thr in IOU_THRESHOLDS}
 all_ssim_rows = []
 all_psnr_rows = []
@@ -352,48 +352,48 @@ def evaluate_ldm(model, dataloader, device, output_dir, ddim_steps=10, ddim_eta=
 
             if (batch_idx + 1) % 1000 == 0:
                 save_iou_tables(all_rows_by_thr, output_dir)
-                #save_ssim_table(all_ssim_rows, output_dir)
+                save_ssim_table(all_ssim_rows, output_dir)
                 save_psnr_table(all_psnr_rows, output_dir)
                 save_nmi_table(all_nmi_rows, output_dir)
 
-            # if save_images:
-            #     fontsize = 8
+            if save_images and batch_idx < 500:
+                fontsize = 8
 
-            #     # GT occupancy maps
-            #     fig = plt.figure(figsize=(8, 1))
-            #     for m in range(SEQ_LEN):
-            #         a = fig.add_subplot(1, SEQ_LEN, m + 1)
-            #         mask = x_gt[0, m]
-            #         input_grid = make_grid(mask.detach().cpu())
-            #         input_image = input_grid.permute(1, 2, 0)
-            #         plt.imshow(input_image)
-            #         plt.xticks([])
-            #         plt.yticks([])
-            #         a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
-            #     img_path = os.path.join(output_dir, f"mask_{batch_idx}.png")
-            #     plt.savefig(img_path, dpi=500)
-            #     plt.close(fig)
+                # GT occupancy maps
+                fig = plt.figure(figsize=(8, 1))
+                for m in range(SEQ_LEN):
+                    a = fig.add_subplot(1, SEQ_LEN, m + 1)
+                    mask = x_gt[0, m]
+                    input_grid = make_grid(mask.detach().cpu())
+                    input_image = input_grid.permute(1, 2, 0)
+                    plt.imshow(input_image)
+                    plt.xticks([])
+                    plt.yticks([])
+                    a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
+                img_path = os.path.join(output_dir, f"mask_{batch_idx}.png")
+                plt.savefig(img_path, dpi=500)
+                plt.close(fig)
 
-            #     # Predicted occupancy maps
-            #     fig = plt.figure(figsize=(8, 1))
-            #     for m in range(SEQ_LEN):
-            #         a = fig.add_subplot(1, SEQ_LEN, m + 1)
-            #         pred = prediction_maps[m]
-            #         input_grid = make_grid(pred.detach().cpu())
-            #         input_image = input_grid.permute(1, 2, 0)
-            #         plt.imshow(input_image)
-            #         plt.xticks([])
-            #         plt.yticks([])
-            #         a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
-            #     img_path = os.path.join(output_dir, f"pred{batch_idx}.png")
-            #     plt.savefig(img_path, dpi=500)
-            #     plt.close(fig)
+                # Predicted occupancy maps
+                fig = plt.figure(figsize=(8, 1))
+                for m in range(SEQ_LEN):
+                    a = fig.add_subplot(1, SEQ_LEN, m + 1)
+                    pred = prediction_maps[m]
+                    input_grid = make_grid(pred.detach().cpu())
+                    input_image = input_grid.permute(1, 2, 0)
+                    plt.imshow(input_image)
+                    plt.xticks([])
+                    plt.yticks([])
+                    a.set_title(f"n={m+1}", fontdict={'fontsize': fontsize})
+                img_path = os.path.join(output_dir, f"pred{batch_idx}.png")
+                plt.savefig(img_path, dpi=500)
+                plt.close(fig)
 
-            #     gif_path = os.path.join(output_dir, f"overlay_{batch_idx}.gif")
-            #     save_prediction_overlay_gif(prediction_maps, x_gt[0], gif_path)
+                gif_path = os.path.join(output_dir, f"overlay_{batch_idx}.gif")
+                save_prediction_overlay_gif(prediction_maps, x_gt[0], gif_path)
 
     save_iou_tables(all_rows_by_thr, output_dir)
-    #save_ssim_table(all_ssim_rows, output_dir)
+    save_ssim_table(all_ssim_rows, output_dir)
     save_psnr_table(all_psnr_rows, output_dir)
     save_nmi_table(all_nmi_rows, output_dir)
 

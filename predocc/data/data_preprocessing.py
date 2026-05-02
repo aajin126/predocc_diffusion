@@ -137,30 +137,30 @@ def preprocess_batch_test(batch, device=None):
                     p = P_prior,
                     size=[B, SEQ_LEN],
                     device = device)
-    obs_pos_N = positions[:, SEQ_LEN - 1] # (B,3)
+
+    # current position and velocity:
+    obs_pos_N = positions[:, SEQ_LEN-1]
     vel_N = velocities[:, SEQ_LEN-1]
-    future_poses = positions[:, SEQ_LEN:] # (B,SEQ_LEN,3)
 
     noise_std = [0, 0, 0] #[0.00111, 0.00112, 0.02319]
-    pos_origin = input_gridMap.origin_pose_prediction(vel_N, obs_pos_N, 1, noise_std)
-
-    x_future_odom = torch.zeros(B, SEQ_LEN, device=device or scans.device)
-    y_future_odom = torch.zeros(B, SEQ_LEN, device=device or scans.device)
-    theta_future_odom = torch.zeros(B, SEQ_LEN, device=device or scans.device)
-
-    x_future_odom, y_future_odom, theta_future_odom = mask_gridMap.robot_coordinate_transform(
-        future_poses, pos_origin
-    )
-
-    future_distances = scans[:, SEQ_LEN:] # get future 10 frames
-    future_angles = torch.linspace(-(135 * np.pi / 180), 135 * np.pi / 180, future_distances.shape[-1], device=scans.device)
-
-    future_distances_x, future_distances_y = mask_gridMap.lidar_scan_xy(
-        future_distances, future_angles, x_future_odom, y_future_odom, theta_future_odom
-    )
-
-    mask_binary_maps = mask_gridMap.discretize(future_distances_x, future_distances_y)  # (B,SEQ_LEN,H,W)
+    pos_origin = mask_gridMap.origin_pose_prediction(vel_N, obs_pos_N, 1, noise_std)
+    
+    # robot positions:
+    x_odom = torch.zeros(B, SEQ_LEN).to(device)
+    y_odom = torch.zeros(B, SEQ_LEN).to(device)
+    theta_odom = torch.zeros(B, SEQ_LEN).to(device)
+    # Lidar measurements:
+    distances = scans[:,SEQ_LEN:]
+    # the angles of lidar scan: -135 ~ 135 degree
+    angles = torch.linspace(-(135*np.pi/180), 135*np.pi/180, distances.shape[-1]).to(device)
+    # Lidar measurements in X-Y plane: transform to the predicted robot reference frame
+    distances_x, distances_y = mask_gridMap.lidar_scan_xy(distances, angles, x_odom, y_odom, theta_odom)
+    # discretize to binary maps:
+    mask_binary_maps = mask_gridMap.discretize(distances_x, distances_y)
     mask_binary_maps = mask_binary_maps.unsqueeze(2)
+
+    # calculate relative future positions to current position:
+    future_poses = positions[:, SEQ_LEN:] 
     x_rel, y_rel, th_rel = mask_gridMap.robot_coordinate_transform(future_poses, pos_origin)
 
     # history maps (input)
@@ -170,11 +170,7 @@ def preprocess_batch_test(batch, device=None):
                             p=P_prior,
                             size=[B, SEQ_LEN],
                             device=device)
-
-    x_odom = torch.zeros(B, SEQ_LEN, device=device or scans.device)
-    y_odom = torch.zeros(B, SEQ_LEN, device=device or scans.device)
-    theta_odom = torch.zeros(B, SEQ_LEN, device=device or scans.device)
-
+    
     pos = positions[:, :SEQ_LEN]
     x_odom, y_odom, theta_odom = input_gridMap.robot_coordinate_transform(pos, pos_origin)
 
